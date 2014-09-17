@@ -2,33 +2,45 @@ from __future__ import print_function
 import imp
 import inspect
 
-#from sphinx.util.inspect import getargspec, isdescriptor, safe_getmembers
+FAKE_NAME = '_noSuchName_'
+            
+def members_to_doc(module_path):
+    module = imp.load_source(FAKE_NAME, module_path)
+    return getattr(module, '__all__', get_members_to_doc(module))
+
+def get_members_to_doc(module):
+    to_doc = [ ]
+    for name, obj in inspect.getmembers(module):
+        if not_hidden(name) and is_in_module(obj):
+            to_doc.append(name)
+    return to_doc
+
+def not_hidden(name):
+    return not name.startswith('_')
+
+def is_in_module(obj):
+    # Filter out implicitly imported members
+    return getattr(obj, '__module__', '') == FAKE_NAME
 
 def main():
-    code = 'from %s import *' % 'pkg.another_module' # 'some_module' 
-    module = imp.new_module('someFakeName')
-    exec code in module.__dict__
+    module_path = './main.py'
+    module = imp.load_source(FAKE_NAME, module_path)
     #
-    # This one seems OK for package imports:
-    print('* __dict__')
-    print([n for n in module.__dict__ if not n.startswith('_')])
-    #
-    # And this one for modules 
     print('* inspect') 
     for name, obj in inspect.getmembers(module):
+        # if not name.startswith('_') !!!
         if inspect.isfunction(obj) or inspect.isclass(obj):
-            print(name)
+            print(name, '(%s)' % obj.__module__)
     #
-    print('* dir()')    
-    print([n for n in dir(module) if not n.startswith('_')])
-    #
-    print('* Sphinx')
+    print('* __all__')
     if hasattr(module, '__all__'):
         print(module.__all__)
     else:
-        pass
-    
-
+        print('does not have __all__')
+    #
+    print('* to document')
+    for name in members_to_doc(module_path):
+        print(name)
 
 if __name__ == '__main__':
     main()
