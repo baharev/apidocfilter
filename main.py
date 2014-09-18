@@ -2,7 +2,7 @@ from __future__ import print_function
 import imp
 import inspect
 
-FAKE_NAME = '_noSuchName_'
+FAKE_NAME = '__noSuchName__'
             
 def members_to_doc(module_path):
     module = imp.load_source(FAKE_NAME, module_path)
@@ -23,7 +23,7 @@ def is_in_module(obj):
     return getattr(obj, '__module__', '') == FAKE_NAME
 
 def main():
-    module_path = './main.py'
+    module_path = './pkg/another_module.py'
     module = imp.load_source(FAKE_NAME, module_path)
     #
     print('* inspect') 
@@ -39,8 +39,8 @@ def main():
         print('does not have __all__')
     #
     print('* to document')
-    for name in members_to_doc(module_path):
-        print(name)
+    print(members_to_doc(module_path))
 
 if __name__ == '__main__':
-    main()
+    import apidoc
+    apidoc.main()
