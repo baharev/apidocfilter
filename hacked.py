@@ -177,8 +177,40 @@ def shall_skip(module, opts):
         return True
     return False
 
+def get_pyfiles_subdirs(rootpath, followlink, excludes, opts):
+    followlinks = getattr(opts, 'followlinks', False)
+    includeprivate = getattr(opts, 'includeprivate', False)
+    # remove hidden ('.') and private ('_') directories, as well as
+    # excluded dirs
+    exclude_prefixes = ('.',) if includeprivate else ('.', '_') 
+    #
+    for root, subs, files in walk(rootpath, followlinks=followlinks):
+            py_files = sorted(f for f in files
+                              if path.splitext(f)[1] in PY_SUFFIXES and
+                              norm_path(root, f) not in excludes)
+            # put shall_skip into the generator as well
 
-def recurse_tree(rootpath, excludes, opts):
+            is_pkg = INITPY in py_files
+            if not is_pkg and root != rootpath:
+                continue # only accept non-package at toplevel
+
+            submods = [path.splitext(sub)[0] for sub in py_files
+                        if not shall_skip(path.join(root, sub), opts) 
+                        and sub != INITPY]
+
+            subs[:] = sorted(sub for sub in subs if not sub.startswith(exclude_prefixes)
+                             and norm_path(root, sub) not in excludes )
+
+            # build a list of directories that are szvpackages (contain an INITPY file)
+            subs = [sub for sub in subs if path.isfile(path.join(root, sub, INITPY))]
+
+            # we are in a package with something to document
+            if subs or len(py_files) > 1 or not \
+                shall_skip(path.join(root, INITPY), opts):
+                pass 
+    return
+
+def walk_dir_tree(rootpath, excludes, opts):
     """
     Look for every file in the directory tree and create the corresponding
     ReST files.
@@ -193,7 +225,7 @@ def recurse_tree(rootpath, excludes, opts):
         # TODO Duplication
         py_files = sorted(f for f in os.listdir(rootpath)
                           if path.splitext(f)[1] in PY_SUFFIXES and
-                          not is_excluded(path.join(rootpath, f), excludes))
+                          norm_path(rootpath, f) not in excludes)
         for py_file in py_files:
             if not shall_skip(path.join(rootpath, py_file), opts):
                 module = path.splitext(py_file)[0]
@@ -213,14 +245,14 @@ def recurse_tree(rootpath, excludes, opts):
         # document only Python module files (that aren't excluded)
         py_files = sorted(f for f in files
                           if path.splitext(f)[1] in PY_SUFFIXES and
-                          not is_excluded(path.join(root, f), excludes))
+                          norm_path(root, f) not in excludes)
         is_pkg = INITPY in py_files
         if not is_pkg and root != rootpath:
             continue # only accept non-package at toplevel 
 
         if is_pkg:
             subs[:] = sorted(sub for sub in subs if not sub.startswith(exclude_prefixes)
-                 and not is_excluded(path.join(root, sub), excludes))
+                 and norm_path(root, sub) not in excludes)
             # we are in a package with something to document
             if subs or len(py_files) > 1 or not \
                 shall_skip(path.join(root, INITPY), opts):
@@ -232,24 +264,12 @@ def recurse_tree(rootpath, excludes, opts):
 
     return toplevels
 
-
 def normalize_excludes(rootpath, excludes):
     """Normalize the excluded directory list."""
-    return [path.normpath(path.abspath(exclude)) for exclude in excludes]
+    return { path.normpath(path.abspath(exclude)) for exclude in excludes }
 
-
-def is_excluded(root, excludes):
-    """Check if the directory is in the exclude list.
-
-    Note: by having trailing slashes, we avoid common prefix issues, like
-          e.g. an exlude "foo" also accidentally excluding "foobar".
-    """
-    root = path.normpath(root)
-    for exclude in excludes:
-        if root == exclude:
-            return True
-    return False
-
+def norm_path(root, mod_or_dir):
+    return path.normpath(path.join(root,mod_or_dir))
 
 def main(argv=sys.argv):
     """Parse and check the command line arguments."""
@@ -311,6 +331,9 @@ Note: By default this script will not overwrite already created files.""")
                       'defaults to --doc-version')
     parser.add_option('--version', action='store_true', dest='show_version',
                       help='Show version information and exit')
+    parser.add_option('--respect-all', action='store_true',
+                      dest='respect_all',
+                      help='Respect __all__ when looking for modules')    
 
     (opts, args) = parser.parse_args(argv[1:])
 
@@ -336,7 +359,7 @@ Note: By default this script will not overwrite already created files.""")
             os.makedirs(opts.destdir)
     rootpath = path.normpath(path.abspath(rootpath))
     excludes = normalize_excludes(rootpath, excludes)
-    modules = recurse_tree(rootpath, excludes, opts)
+    modules = walk_dir_tree(rootpath, excludes, opts)
     if opts.full:
         from sphinx import quickstart as qs
         modules.sort()
