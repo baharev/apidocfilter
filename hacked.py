@@ -177,17 +177,43 @@ def shall_skip(module, opts):
         return True
     return False
 
-def get_pyfiles_subdirs(rootpath, followlink, excludes, opts):
+################################################################################
+
+import imp
+
+def get_modules(excluded, opts, root, files):
+    #
+    if opts.respect_all and INITPY in files:
+        module = imp.load_source('__noSuchName__', os.path.join(root,INITPY))
+        todoc  = getattr(module, '__all__', default=None)
+        if todoc is not None:
+            return [ mod+'.py' for mod in todoc ]
+    ###########################################################
+    #else:
+    return sorted( f for f in files
+                      if path.splitext(f)[1] in PY_SUFFIXES and
+                         norm_path(root, f) not in excluded and
+                         f != INITPY                        and
+                        (not f.startswith('_') or opts.includeprivate) )
+
+
+def get_subpkgs(exclude_prefixes, excluded, opts, root, dirs):
+    #
+    return sorted( d for d in dirs 
+                      if not d.startswith(exclude_prefixes) and
+                         norm_path(root, d) not in excluded and
+                         path.isfile(path.join(root, d, INITPY)) )
+
+
+def get_pyfiles_subdirs(rootpath, followlink, excluded, opts):
     followlinks = getattr(opts, 'followlinks', False)
     includeprivate = getattr(opts, 'includeprivate', False)
-    # remove hidden ('.') and private ('_') directories, as well as
-    # excluded dirs
     exclude_prefixes = ('.',) if includeprivate else ('.', '_') 
     #
     for root, subs, files in walk(rootpath, followlinks=followlinks):
             py_files = sorted(f for f in files
                               if path.splitext(f)[1] in PY_SUFFIXES and
-                              norm_path(root, f) not in excludes)
+                              norm_path(root, f) not in excluded)
             # put shall_skip into the generator as well
 
             is_pkg = INITPY in py_files
@@ -199,7 +225,7 @@ def get_pyfiles_subdirs(rootpath, followlink, excludes, opts):
                         and sub != INITPY]
 
             subs[:] = sorted(sub for sub in subs if not sub.startswith(exclude_prefixes)
-                             and norm_path(root, sub) not in excludes )
+                             and norm_path(root, sub) not in excluded )
 
             # build a list of directories that are szvpackages (contain an INITPY file)
             subs = [sub for sub in subs if path.isfile(path.join(root, sub, INITPY))]
