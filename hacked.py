@@ -93,7 +93,7 @@ def create_module_file(package, module, opts):
     write_file(makename(package, module), text, opts)
 
 
-def create_package_file(root, master_package, subroot, submods, opts, subs):
+def create_package_file(master_package, subroot, submods, opts, subs):
     """Build the text of the file and write the file."""
     text = format_heading(1, '%s package' % makename(master_package, subroot))
 
@@ -166,7 +166,7 @@ def get_all_from_initpy(root):
     initpy_path = os.path.join(root,INITPY)
     assert os.path.isfile(initpy_path), root
     module = imp.load_source('__noSuchName__', initpy_path)
-    return getattr(module, '__all__', default=None)
+    return getattr(module, '__all__', None)
 
 
 def get_modules_from_files(excluded, opts, root, files):
@@ -185,9 +185,11 @@ def get_modules(excluded, opts, root, files):
     return get_modules_from_files(excluded, opts, root, files)
 
 
-def may_have_sg_to_document(root, d):
+def pkg_may_have_sg_to_document(opts, root, d):
+    if not opts.respect_all:
+        return True
     todoc = get_all_from_initpy(os.path.join(root,d))
-    return todoc is None or len(todoc)>0
+    return True if todoc else False
 
 
 def get_subpkgs(exclude_prefixes, excluded, opts, root, dirs):
@@ -195,20 +197,33 @@ def get_subpkgs(exclude_prefixes, excluded, opts, root, dirs):
                       if not d.startswith(exclude_prefixes)    and
                          norm_path(root, d) not in excluded    and
                          path.isfile(path.join(root,d,INITPY)) and 
-                         may_have_sg_to_document(root,d) )
+                         pkg_may_have_sg_to_document(opts,root,d) )
 
 
-def gen_root_modules_subpkgs(rootpath, excluded, opts):
+def is_not_private(pkg_name):
+    return not pkg_name.startswith('_') and '._' not in pkg_name 
+
+
+def gen_packages(rootpath, opts):
     followlinks = getattr(opts, 'followlinks', False)
+    includeprivate = getattr(opts, 'includeprivate', False)
+    #    
+    for root, subs, files in walk(rootpath, followlinks=followlinks):
+        pkg_name = root[len(rootpath):].lstrip(path.sep).replace(path.sep, '.')
+        if INITPY in files and (includeprivate or is_not_private(pkg_name)):
+            yield root, pkg_name, subs, files
+
+
+def gen_pkgname_modules_subpkgs(rootpath, excluded, opts):
     includeprivate = getattr(opts, 'includeprivate', False)
     exclude_prefixes = ('.',) if includeprivate else ('.', '_') 
     #
-    for root, subs, files in walk(rootpath, followlinks=followlinks):
-        if INITPY in files:
-            modules = get_modules(excluded, opts, root, files)
-            subpkgs = get_subpkgs(exclude_prefixes, excluded, opts, root, subs)
-            if modules or subpkgs:
-                yield root, modules, subpkgs 
+    for root, pkg_name, subs, files in gen_packages(rootpath, opts):
+        modules = get_modules(excluded, opts, root, files)
+        subpkgs = get_subpkgs(exclude_prefixes, excluded, opts, root, subs)
+        if modules or subpkgs:
+            yield pkg_name, modules, subpkgs 
+
 
 def walk_dir_tree(rootpath, excludes, opts):
     """
@@ -227,10 +242,9 @@ def walk_dir_tree(rootpath, excludes, opts):
             create_module_file(root_package, module, opts)
             toplevels.append(module)
 
-    for root, modules, subpkgs in gen_root_modules_subpkgs(rootpath, excludes, opts):
-        subpackage = root[len(rootpath):].lstrip(path.sep).replace(path.sep, '.')
-        create_package_file(root, root_package, subpackage, modules, opts, subpkgs)
-        toplevels.append(makename(root_package, subpackage))
+    for pkgname,modules,subpkgs in gen_pkgname_modules_subpkgs(rootpath,excludes,opts):
+        create_package_file(root_package, pkgname, modules, opts, subpkgs)
+        toplevels.append(makename(root_package, pkgname))
 
     return toplevels
 
