@@ -93,7 +93,7 @@ def create_module_file(package, module, opts):
     write_file(makename(package, module), text, opts)
 
 
-def create_package_file(root, master_package, subroot, py_files, opts, subs):
+def create_package_file(root, master_package, subroot, submods, opts, subs):
     """Build the text of the file and write the file."""
     text = format_heading(1, '%s package' % makename(master_package, subroot))
 
@@ -101,8 +101,6 @@ def create_package_file(root, master_package, subroot, py_files, opts, subs):
         text += format_directive(subroot, master_package)
         text += '\n'
 
-    # build a list of directories that are szvpackages (contain an INITPY file)
-    subs = [sub for sub in subs if path.isfile(path.join(root, sub, INITPY))]
     # if there are some package directories, add a TOC for theses subpackages
     if subs:
         text += format_heading(2, 'Subpackages')
@@ -111,9 +109,6 @@ def create_package_file(root, master_package, subroot, py_files, opts, subs):
             text += '    %s.%s\n' % (makename(master_package, subroot), sub)
         text += '\n'
 
-    submods = [path.splitext(sub)[0] for sub in py_files
-               if not shall_skip(path.join(root, sub), opts)
-               and sub != INITPY]
     if submods:
         text += format_heading(2, 'Submodules')
         if opts.separatemodules:
@@ -164,77 +159,56 @@ def create_modules_toc_file(modules, opts, name='modules'):
 
     write_file(name, text, opts)
 
-
-def shall_skip(module, opts):
-    """Check if we want to skip this module."""
-    # skip it if there is nothing (or just \n or \r\n) in the file
-    if path.getsize(module) <= 2:
-        return True
-    # skip if it has a "private" name and this is selected
-    filename = path.basename(module)
-    if filename != '__init__.py' and filename.startswith('_') and \
-        not opts.includeprivate:
-        return True
-    return False
-
 ################################################################################
-
 import imp
 
-def get_modules(excluded, opts, root, files):
-    #
-    if opts.respect_all and INITPY in files:
-        module = imp.load_source('__noSuchName__', os.path.join(root,INITPY))
-        todoc  = getattr(module, '__all__', default=None)
-        if todoc is not None:
-            return [ mod+'.py' for mod in todoc ]
-    ###########################################################
-    #else:
-    return sorted( f for f in files
+def get_all_from_initpy(root):
+    initpy_path = os.path.join(root,INITPY)
+    assert os.path.isfile(initpy_path), root
+    module = imp.load_source('__noSuchName__', initpy_path)
+    return getattr(module, '__all__', default=None)
+
+
+def get_modules_from_files(excluded, opts, root, files):
+    return sorted( path.splitext(f)[0] for f in files
                       if path.splitext(f)[1] in PY_SUFFIXES and
                          norm_path(root, f) not in excluded and
                          f != INITPY                        and
                         (not f.startswith('_') or opts.includeprivate) )
 
 
+def get_modules(excluded, opts, root, files):
+    if opts.respect_all:
+        todoc = get_all_from_initpy(root)
+        if todoc is not None:
+            return todoc
+    return get_modules_from_files(excluded, opts, root, files)
+
+
+def may_have_sg_to_document(root, d):
+    todoc = get_all_from_initpy(os.path.join(root,d))
+    return todoc is None or len(todoc)>0
+
+
 def get_subpkgs(exclude_prefixes, excluded, opts, root, dirs):
-    #
     return sorted( d for d in dirs 
-                      if not d.startswith(exclude_prefixes) and
-                         norm_path(root, d) not in excluded and
-                         path.isfile(path.join(root, d, INITPY)) )
+                      if not d.startswith(exclude_prefixes)    and
+                         norm_path(root, d) not in excluded    and
+                         path.isfile(path.join(root,d,INITPY)) and 
+                         may_have_sg_to_document(root,d) )
 
 
-def get_pyfiles_subdirs(rootpath, followlink, excluded, opts):
+def gen_root_modules_subpkgs(rootpath, excluded, opts):
     followlinks = getattr(opts, 'followlinks', False)
     includeprivate = getattr(opts, 'includeprivate', False)
     exclude_prefixes = ('.',) if includeprivate else ('.', '_') 
     #
     for root, subs, files in walk(rootpath, followlinks=followlinks):
-            py_files = sorted(f for f in files
-                              if path.splitext(f)[1] in PY_SUFFIXES and
-                              norm_path(root, f) not in excluded)
-            # put shall_skip into the generator as well
-
-            is_pkg = INITPY in py_files
-            if not is_pkg and root != rootpath:
-                continue # only accept non-package at toplevel
-
-            submods = [path.splitext(sub)[0] for sub in py_files
-                        if not shall_skip(path.join(root, sub), opts) 
-                        and sub != INITPY]
-
-            subs[:] = sorted(sub for sub in subs if not sub.startswith(exclude_prefixes)
-                             and norm_path(root, sub) not in excluded )
-
-            # build a list of directories that are szvpackages (contain an INITPY file)
-            subs = [sub for sub in subs if path.isfile(path.join(root, sub, INITPY))]
-
-            # we are in a package with something to document
-            if subs or len(py_files) > 1 or not \
-                shall_skip(path.join(root, INITPY), opts):
-                pass 
-    return
+        if INITPY in files:
+            modules = get_modules(excluded, opts, root, files)
+            subpkgs = get_subpkgs(exclude_prefixes, excluded, opts, root, subs)
+            if modules or subpkgs:
+                yield root, modules, subpkgs 
 
 def walk_dir_tree(rootpath, excludes, opts):
     """
@@ -248,45 +222,15 @@ def walk_dir_tree(rootpath, excludes, opts):
     else:
         # otherwise, the base is a directory with packages
         root_package = None
-        # TODO Duplication
-        py_files = sorted(f for f in os.listdir(rootpath)
-                          if path.splitext(f)[1] in PY_SUFFIXES and
-                          norm_path(rootpath, f) not in excludes)
-        for py_file in py_files:
-            if not shall_skip(path.join(rootpath, py_file), opts):
-                module = path.splitext(py_file)[0]
-                create_module_file(root_package, module, opts)
-                toplevels.append(module)
+        py_files = get_modules_from_files(excludes,opts,rootpath,os.listdir(rootpath))
+        for module in py_files:
+            create_module_file(root_package, module, opts)
+            toplevels.append(module)
 
-    followlinks = getattr(opts, 'followlinks', False)
-    includeprivate = getattr(opts, 'includeprivate', False)
-    # remove hidden ('.') and private ('_') directories, as well as
-    # excluded dirs
-    if includeprivate:
-        exclude_prefixes = ('.',)
-    else:
-        exclude_prefixes = ('.', '_')
-    
-    for root, subs, files in walk(rootpath, followlinks=followlinks):
-        # document only Python module files (that aren't excluded)
-        py_files = sorted(f for f in files
-                          if path.splitext(f)[1] in PY_SUFFIXES and
-                          norm_path(root, f) not in excludes)
-        is_pkg = INITPY in py_files
-        if not is_pkg and root != rootpath:
-            continue # only accept non-package at toplevel 
-
-        if is_pkg:
-            subs[:] = sorted(sub for sub in subs if not sub.startswith(exclude_prefixes)
-                 and norm_path(root, sub) not in excludes)
-            # we are in a package with something to document
-            if subs or len(py_files) > 1 or not \
-                shall_skip(path.join(root, INITPY), opts):
-                subpackage = root[len(rootpath):].lstrip(path.sep).\
-                    replace(path.sep, '.')
-                create_package_file(root, root_package, subpackage,
-                                    py_files, opts, subs)
-                toplevels.append(makename(root_package, subpackage))
+    for root, modules, subpkgs in gen_root_modules_subpkgs(rootpath, excludes, opts):
+        subpackage = root[len(rootpath):].lstrip(path.sep).replace(path.sep, '.')
+        create_package_file(root, root_package, subpackage, modules, opts, subpkgs)
+        toplevels.append(makename(root_package, subpackage))
 
     return toplevels
 
