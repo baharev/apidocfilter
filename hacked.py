@@ -192,13 +192,18 @@ def pkgname_modules_subpkgs(rootpath, excluded, opts):
     tuples of (package name, modules, subpackages).  
     """
     for root, dirs, files in walk(rootpath, followlinks=opts.followlinks):
+        if root in excluded:
+            del dirs[:] # skip all subdirectories as well
+            continue
         if INITPY not in files:
             continue
         pkg_name = root[len(rootpath):].lstrip(path.sep).replace(path.sep, '.')
         if not opts.includeprivate and is_private(pkg_name):
+            del dirs[:] # skip all subdirectories as well
             continue
         modules = get_modules(files, excluded, opts, root)
         subpkgs = get_subpkgs( dirs, excluded, opts, root)
+        dirs[:] = subpkgs # visit only subpackages
         if modules or subpkgs:
             yield pkg_name, modules, subpkgs 
 
