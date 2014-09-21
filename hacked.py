@@ -16,9 +16,11 @@
 """
 from __future__ import print_function
 
+import imp
 import os
 import sys
 import optparse
+import traceback
 from os import path
 
 from sphinx.util.osutil import walk
@@ -160,21 +162,47 @@ def create_modules_toc_file(modules, opts, name='modules'):
     write_file(name, text, opts)
 
 ################################################################################
-import imp
 
-def get_all_from_initpy(root):
-    initpy_path = os.path.join(root,INITPY)
-    assert os.path.isfile(initpy_path), root
-    module = imp.load_source('__noSuchName__', initpy_path)
-    return getattr(module, '__all__', None)
+def walk_dir_tree(rootpath, excludes, opts):
+    """
+    Look for every file in the directory tree and create the corresponding
+    ReST files.
+    """
+    toplevels = []
+    if path.isfile(path.join(rootpath, INITPY)):
+        root_package = rootpath.split(path.sep)[-1]
+    else:
+        # generate rst for the top level modules even if we are not in a package
+        root_package = None
+        mods = get_modules_from(os.listdir(rootpath), excludes, opts, rootpath)
+        for module in mods:
+            create_module_file(root_package, module, opts)
+            toplevels.append(module)
+    # Do the actual directory tree walk
+    for pkgname,mods,subpkgs in pkgname_modules_subpkgs(rootpath,excludes,opts):
+        create_package_file(root_package, pkgname, mods, opts, subpkgs)
+        toplevels.append(makename(root_package, pkgname))
+
+    return toplevels
 
 
-def get_modules_from_files(excluded, opts, root, files):
-    return sorted( path.splitext(f)[0] for f in files
-                      if path.splitext(f)[1] in PY_SUFFIXES and
-                         norm_path(root, f) not in excluded and
-                         f != INITPY                        and
-                        (not f.startswith('_') or opts.includeprivate) )
+def pkgname_modules_subpkgs(rootpath, excluded, opts):
+    exclude_prefixes = ('.',) if opts.includeprivate else ('.', '_')     
+    #    
+    for root, dirs, files in walk(rootpath, followlinks=opts.followlinks):
+        if INITPY not in files:
+            continue
+        pkg_name = root[len(rootpath):].lstrip(path.sep).replace(path.sep, '.')
+        if not opts.includeprivate and is_private(pkg_name):
+            continue
+        modules = get_modules(excluded, opts, root, files)
+        subpkgs = get_subpkgs(exclude_prefixes, excluded, opts, root, dirs)
+        if modules or subpkgs:
+            yield pkg_name, modules, subpkgs 
+
+
+def is_private(pkg_name):
+    return pkg_name.startswith('_') or '._' in pkg_name 
 
 
 def get_modules(excluded, opts, root, files):
@@ -182,14 +210,28 @@ def get_modules(excluded, opts, root, files):
         todoc = get_all_from_initpy(root)
         if todoc is not None:
             return todoc
-    return get_modules_from_files(excluded, opts, root, files)
+    return get_modules_from(files, excluded, opts, root)
 
 
-def pkg_may_have_sg_to_document(opts, root, d):
-    if not opts.respect_all:
-        return True
-    todoc = get_all_from_initpy(os.path.join(root,d))
-    return True if todoc else False
+def get_all_from_initpy(root):
+    initpy_path = os.path.join(root,INITPY)
+    assert os.path.isfile(initpy_path), root
+    try:
+        module = imp.load_source('__supposedlyUniqueName__', initpy_path)
+        return getattr(module, '__all__', None)
+    except:
+        print(traceback.format_exc(),file=sys.stderr)
+        print('Please make sure that',initpy_path,'can be imported',
+              '(or exclude the package).', file=sys.stderr)
+        sys.exit(1)
+
+
+def get_modules_from(files, excluded, opts, root):
+    return sorted( path.splitext(f)[0] for f in files
+                   if path.splitext(f)[1] in PY_SUFFIXES and
+                      norm_path(root, f) not in excluded and
+                      f != INITPY                        and
+                     (not f.startswith('_') or opts.includeprivate) )
 
 
 def get_subpkgs(exclude_prefixes, excluded, opts, root, dirs):
@@ -200,60 +242,22 @@ def get_subpkgs(exclude_prefixes, excluded, opts, root, dirs):
                          pkg_may_have_sg_to_document(opts,root,d) )
 
 
-def is_not_private(pkg_name):
-    return not pkg_name.startswith('_') and '._' not in pkg_name 
+def pkg_may_have_sg_to_document(opts, root, d):
+    if not opts.respect_all:
+        return True
+    todoc = get_all_from_initpy(os.path.join(root,d))
+    return True if todoc else False
 
-
-def gen_packages(rootpath, opts):
-    followlinks = getattr(opts, 'followlinks', False)
-    includeprivate = getattr(opts, 'includeprivate', False)
-    #    
-    for root, subs, files in walk(rootpath, followlinks=followlinks):
-        pkg_name = root[len(rootpath):].lstrip(path.sep).replace(path.sep, '.')
-        if INITPY in files and (includeprivate or is_not_private(pkg_name)):
-            yield root, pkg_name, subs, files
-
-
-def gen_pkgname_modules_subpkgs(rootpath, excluded, opts):
-    includeprivate = getattr(opts, 'includeprivate', False)
-    exclude_prefixes = ('.',) if includeprivate else ('.', '_') 
-    #
-    for root, pkg_name, subs, files in gen_packages(rootpath, opts):
-        modules = get_modules(excluded, opts, root, files)
-        subpkgs = get_subpkgs(exclude_prefixes, excluded, opts, root, subs)
-        if modules or subpkgs:
-            yield pkg_name, modules, subpkgs 
-
-
-def walk_dir_tree(rootpath, excludes, opts):
-    """
-    Look for every file in the directory tree and create the corresponding
-    ReST files.
-    """
-    toplevels = []
-    # check if the base directory is a package and get its name
-    if path.isfile(path.join(rootpath, INITPY)):
-        root_package = rootpath.split(path.sep)[-1]
-    else:
-        # otherwise, the base is a directory with packages
-        root_package = None
-        py_files = get_modules_from_files(excludes,opts,rootpath,os.listdir(rootpath))
-        for module in py_files:
-            create_module_file(root_package, module, opts)
-            toplevels.append(module)
-
-    for pkgname,modules,subpkgs in gen_pkgname_modules_subpkgs(rootpath,excludes,opts):
-        create_package_file(root_package, pkgname, modules, opts, subpkgs)
-        toplevels.append(makename(root_package, pkgname))
-
-    return toplevels
+################################################################################
 
 def normalize_excludes(rootpath, excludes):
     """Normalize the excluded directory list."""
     return { path.normpath(path.abspath(exclude)) for exclude in excludes }
 
+
 def norm_path(root, mod_or_dir):
     return path.normpath(path.join(root,mod_or_dir))
+
 
 def main(argv=sys.argv):
     """Parse and check the command line arguments."""
@@ -338,6 +342,10 @@ Note: By default this script will not overwrite already created files.""")
     if not path.isdir(rootpath):
         print('%s is not a directory.' % rootpath, file=sys.stderr)
         sys.exit(1)
+    if opts.includeprivate and opts.respect_all:
+        msg = 'Either --private or --respect-all but not both'
+        print(msg,file=sys.stderr)
+        sys.exit(1)        
     if not path.isdir(opts.destdir):
         if not opts.dryrun:
             os.makedirs(opts.destdir)
@@ -345,7 +353,6 @@ Note: By default this script will not overwrite already created files.""")
     excludes = normalize_excludes(rootpath, excludes)
     modules = walk_dir_tree(rootpath, excludes, opts)
     if opts.full:
-        from sphinx import quickstart as qs
         modules.sort()
         prev_module = ''
         text = ''
@@ -373,6 +380,7 @@ Note: By default this script will not overwrite already created files.""")
             mastertoctree = text,
         )
         if not opts.dryrun:
+            from sphinx import quickstart as qs
             qs.generate(d, silent=True, overwrite=opts.force)
     elif not opts.notoc:
         create_modules_toc_file(modules, opts)
