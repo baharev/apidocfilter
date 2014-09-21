@@ -231,8 +231,8 @@ def get_all_attribute(path):
     otherwise None is returned. Calls sys.exit on failure (e.g. ImportError).
     """
     try:
-        head, pkg = os.path.split(path)
-        sys.path.append(head)
+        head, pkg = os.path.split(path) # How does this play with hierarchical packages?
+        sys.path.append(head) # FIXME Or prepend?
         before = set(sys.modules)
         module = importlib.import_module(pkg)
         difference  = sys.modules.viewkeys() - before
@@ -242,7 +242,7 @@ def get_all_attribute(path):
         return all_attrib
     except:
         print(tb.format_exc(),file=sys.stderr)         
-        print('Please make sure that',path,'can be loaded',
+        print('Please make sure that',path,'can be imported',
               '(or exclude this path).', file=sys.stderr)
 #       sys.exit(1)        # FIXME Or a --sloppy option?
     finally:
