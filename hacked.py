@@ -172,7 +172,8 @@ def walk_dir_tree(rootpath, excludes, opts):
     if path.isfile(path.join(rootpath, INITPY)):
         root_package = rootpath.split(path.sep)[-1]
     else:
-        # generate rst for the top level modules even if we are not in a package
+        # generate .rst files for the top level modules even if we are  
+        # not in a package (this is a one time exception)
         root_package = None
         mods = get_modules_from(os.listdir(rootpath), excludes, opts, rootpath)
         for module in mods:
@@ -187,16 +188,18 @@ def walk_dir_tree(rootpath, excludes, opts):
 
 
 def pkgname_modules_subpkgs(rootpath, excluded, opts):
-    exclude_prefixes = ('.',) if opts.includeprivate else ('.', '_')     
-    #    
+    """
+    A generator, filters out the packages and modules as desired and yields
+    tuples of (package name, modules, subpackages).  
+    """
     for root, dirs, files in walk(rootpath, followlinks=opts.followlinks):
         if INITPY not in files:
             continue
         pkg_name = root[len(rootpath):].lstrip(path.sep).replace(path.sep, '.')
         if not opts.includeprivate and is_private(pkg_name):
             continue
-        modules = get_modules(excluded, opts, root, files)
-        subpkgs = get_subpkgs(exclude_prefixes, excluded, opts, root, dirs)
+        modules = get_modules(files, excluded, opts, root)
+        subpkgs = get_subpkgs( dirs, excluded, opts, root)
         if modules or subpkgs:
             yield pkg_name, modules, subpkgs 
 
@@ -205,24 +208,33 @@ def is_private(pkg_name):
     return pkg_name.startswith('_') or '._' in pkg_name 
 
 
-def get_modules(excluded, opts, root, files):
+def get_modules(files, excluded, opts, root):
+    """
+    Returns __all__ if __all__ is considered and is present in __init__.py, 
+    otherwise the modules in the current directory are returned. 
+    """
     if opts.respect_all:
         todoc = get_all_from_initpy(root)
         if todoc is not None:
             return todoc
+    # __all__ is either ignored by the user or not present in __init__.py
     return get_modules_from(files, excluded, opts, root)
 
 
 def get_all_from_initpy(root):
+    """
+    Returns __all__ from __init__.py if __all__ is present, None otherwise.
+    Assumes that __init__.py can be loaded, calls sys.exit on failure.
+    """
     initpy_path = os.path.join(root,INITPY)
     assert os.path.isfile(initpy_path), root
     try:
-        module = imp.load_source('__supposedlyUniqueName__', initpy_path)
+        module = imp.load_source('__a_hopefully_unique_name__', initpy_path)
         return getattr(module, '__all__', None)
     except:
         print(traceback.format_exc(),file=sys.stderr)
         print('Please make sure that',initpy_path,'can be imported',
-              '(or exclude the package).', file=sys.stderr)
+              '(or exclude this package).', file=sys.stderr)
         sys.exit(1)
 
 
@@ -234,7 +246,8 @@ def get_modules_from(files, excluded, opts, root):
                      (not f.startswith('_') or opts.includeprivate) )
 
 
-def get_subpkgs(exclude_prefixes, excluded, opts, root, dirs):
+def get_subpkgs(dirs, excluded, opts, root):
+    exclude_prefixes = ('.',) if opts.includeprivate else ('.', '_')
     return sorted( d for d in dirs 
                       if not d.startswith(exclude_prefixes)    and
                          norm_path(root, d) not in excluded    and
@@ -243,10 +256,16 @@ def get_subpkgs(exclude_prefixes, excluded, opts, root, dirs):
 
 
 def pkg_may_have_sg_to_document(opts, root, d):
+    """
+    Returns True if __all__ is not considered. If __all__ is considered and it 
+    is present in __init__.py, then it must be non-empty.
+    """    
     if not opts.respect_all:
         return True
     todoc = get_all_from_initpy(os.path.join(root,d))
-    return True if todoc else False
+    if todoc is None:
+        return True
+    return len(todoc) > 0
 
 ################################################################################
 
