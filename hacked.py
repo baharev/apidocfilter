@@ -161,7 +161,6 @@ def create_modules_toc_file(modules, opts, name='modules'):
 
     write_file(name, text, opts)
 
-################################################################################
 
 def walk_dir_tree(rootpath, excludes, opts):
     """
@@ -189,7 +188,7 @@ def walk_dir_tree(rootpath, excludes, opts):
 
 def pkgname_modules_subpkgs(rootpath, excluded, opts):
     """
-    A generator, filters out the packages and modules as desired and yields
+    A generator filtering out the packages and modules as desired and yielding
     tuples of (package name, modules, subpackages).  
     """
     for root, dirs, files in walk(rootpath, followlinks=opts.followlinks):
@@ -233,12 +232,13 @@ def get_all_from_initpy(root):
         return getattr(module, '__all__', None)
     except:
         print(traceback.format_exc(),file=sys.stderr)
-        print('Please make sure that',initpy_path,'can be imported',
+        print('Please make sure that',initpy_path,'can be loaded',
               '(or exclude this package).', file=sys.stderr)
         sys.exit(1)
 
 
 def get_modules_from(files, excluded, opts, root):
+    """Filter out and sort the considered python modules from files."""
     return sorted( path.splitext(f)[0] for f in files
                    if path.splitext(f)[1] in PY_SUFFIXES and
                       norm_path(root, f) not in excluded and
@@ -247,12 +247,17 @@ def get_modules_from(files, excluded, opts, root):
 
 
 def get_subpkgs(dirs, excluded, opts, root):
+    """Filter out and sort the considered subpackages from dirs."""    
     exclude_prefixes = ('.',) if opts.includeprivate else ('.', '_')
     return sorted( d for d in dirs 
                       if not d.startswith(exclude_prefixes)    and
                          norm_path(root, d) not in excluded    and
                          path.isfile(path.join(root,d,INITPY)) and 
                          pkg_may_have_sg_to_document(opts,root,d) )
+
+
+def norm_path(root, mod_or_dir):
+    return path.normpath(path.join(root,mod_or_dir))
 
 
 def pkg_may_have_sg_to_document(opts, root, d):
@@ -266,16 +271,6 @@ def pkg_may_have_sg_to_document(opts, root, d):
     if todoc is None:
         return True
     return len(todoc) > 0
-
-################################################################################
-
-def normalize_excludes(rootpath, excludes):
-    """Normalize the excluded directory list."""
-    return { path.normpath(path.abspath(exclude)) for exclude in excludes }
-
-
-def norm_path(root, mod_or_dir):
-    return path.normpath(path.join(root,mod_or_dir))
 
 
 def main(argv=sys.argv):
@@ -368,8 +363,8 @@ Note: By default this script will not overwrite already created files.""")
     if not path.isdir(opts.destdir):
         if not opts.dryrun:
             os.makedirs(opts.destdir)
-    rootpath = path.normpath(path.abspath(rootpath))
-    excludes = normalize_excludes(rootpath, excludes)
+    rootpath =   path.normpath(path.abspath(rootpath))
+    excludes = { path.normpath(path.abspath(exclude)) for exclude in excludes }
     modules = walk_dir_tree(rootpath, excludes, opts)
     if opts.full:
         modules.sort()
