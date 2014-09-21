@@ -19,7 +19,7 @@ def get_all_from_initpy(path):
         print('imp.load_source failed for',initpy_path)
         #sys.exit(1)
         
-def using_importlib(path, package):
+def get_all_attrib(path, package):
     initpy_path = os.path.join(path,'__init__.py')
     assert os.path.isfile(initpy_path), path
     try:
@@ -38,11 +38,11 @@ def using_importlib(path, package):
 def main():
     print(get_all_from_initpy('/usr/lib/python2.7/xml'))
     print('--------------------------------------------------------------')
-    print(using_importlib('/usr/lib/python2.7/xml', 'xml'))    
+    print(get_all_attrib('/usr/lib/python2.7/xml', 'xml'))    
     print('--------------------------------------------------------------')
     get_all_from_initpy('/usr/lib/python2.7/unittest')
     print('--------------------------------------------------------------')
-    using_importlib('/usr/lib/python2.7/unittest', 'unittest')      
+    get_all_attrib('/usr/lib/python2.7/unittest', 'unittest')      
         
 if __name__ == '__main__':
     main()
