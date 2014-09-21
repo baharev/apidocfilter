@@ -16,11 +16,11 @@
 """
 from __future__ import print_function
 
-import imp
+import importlib
 import os
 import sys
 import optparse
-import traceback
+import traceback as tb
 from os import path
 
 from sphinx.util.osutil import walk
@@ -218,28 +218,35 @@ def get_modules(files, excluded, opts, root):
     otherwise the modules in the current directory are returned. 
     """
     if opts.respect_all:
-        todoc = get_all_from_initpy(root)
+        todoc = get_all_attribute(root)
         if todoc is not None:
             return todoc
     # __all__ is either ignored by the user or not present in __init__.py
     return get_modules_from(files, excluded, opts, root)
 
 
-def get_all_from_initpy(root):
+def get_all_attribute(path):
     """
-    Returns __all__ from __init__.py if __all__ is present, None otherwise.
-    Assumes that __init__.py can be loaded, calls sys.exit on failure.
+    Returns the __all__ attribute of the package if has this attribute, 
+    otherwise None is returned. Calls sys.exit on failure (e.g. ImportError).
     """
-    initpy_path = os.path.join(root,INITPY)
-    assert os.path.isfile(initpy_path), root
     try:
-        module = imp.load_source('__a_hopefully_unique_name__', initpy_path)
-        return getattr(module, '__all__', None)
+        head, pkg = os.path.split(path)
+        sys.path.append(head)
+        before = set(sys.modules)
+        module = importlib.import_module(pkg)
+        difference  = sys.modules.viewkeys() - before
+        all_attrib = getattr(module, '__all__', None)
+        for k in difference:
+            sys.modules.pop(k)
+        return all_attrib
     except:
-        print(traceback.format_exc(),file=sys.stderr)
-        print('Please make sure that',initpy_path,'can be loaded',
-              '(or exclude this package).', file=sys.stderr)
-        sys.exit(1)
+        print(tb.format_exc(),file=sys.stderr)         
+        print('Please make sure that',path,'can be loaded',
+              '(or exclude this path).', file=sys.stderr)
+#       sys.exit(1)        # FIXME Or a --sloppy option?
+    finally:
+        sys.path.remove(head)
 
 
 def get_modules_from(files, excluded, opts, root):
@@ -272,7 +279,7 @@ def pkg_may_have_sg_to_document(opts, root, d):
     """    
     if not opts.respect_all:
         return True
-    todoc = get_all_from_initpy(os.path.join(root,d))
+    todoc = get_all_attribute(os.path.join(root,d))
     if todoc is None:
         return True
     return len(todoc) > 0

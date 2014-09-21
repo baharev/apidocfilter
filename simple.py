@@ -10,7 +10,7 @@ def get_all_attrib(path):
         before = set(sys.modules)
         module = importlib.import_module(pkg, package=pkg)
         difference  = sys.modules.viewkeys() - before
-        print('difference =', str(difference))
+        #print('difference =', str(difference))
         all_attrib = getattr(module, '__all__', None)
         for k in difference:
             sys.modules.pop(k)
