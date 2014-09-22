@@ -57,12 +57,14 @@ def write_file(name, text, opts):
     """Write the output file for module/package <name>."""
     fname = path.join(opts.destdir, '%s.%s' % (name, opts.suffix))
     if opts.dryrun:
+        # FIXME --quiet option?
         print('Would create file %s.' % fname)
         return
     if not opts.force and path.isfile(fname):
-        print('File %s already exists, skipping.' % fname)
+        #print('File %s already exists, skipping.' % fname)
+        pass
     else:
-        print('Creating file %s.' % fname)
+        #print('Creating file %s.' % fname)
         f = open(fname, 'w')
         try:
             f.write(text)
@@ -167,6 +169,8 @@ def walk_dir_tree(rootpath, excludes, opts):
     Look for every file in the directory tree and create the corresponding
     ReST files.
     """
+    # FIXME
+    print('Started', file=sys.stderr)
     toplevels = []
     if path.isfile(path.join(rootpath, INITPY)):
         root_package = rootpath.split(path.sep)[-1]
@@ -208,6 +212,7 @@ def pkgname_modules_subpkgs(rootpath, excluded, opts):
             yield pkg_name, modules, subpkgs 
 
 
+# FIXME Do we still need the '._' check now that the path is properly excluded?
 def is_private(pkg_name):
     return pkg_name.startswith('_') or '._' in pkg_name 
 
@@ -231,22 +236,22 @@ def get_all_attribute(path):
     otherwise None is returned. Calls sys.exit on failure (e.g. ImportError).
     """
     try:
+        path_before = list(sys.path)
+        modules_before = set(sys.modules)
         head, pkg = os.path.split(path) # How does this play with hierarchical packages?
-        sys.path.append(head) # FIXME Or prepend?
-        before = set(sys.modules)
+        sys.path = [head] + sys.path # FIXME Prepend or append?
         module = importlib.import_module(pkg)
-        difference  = sys.modules.viewkeys() - before
-        all_attrib = getattr(module, '__all__', None)
-        for k in difference:
-            sys.modules.pop(k)
-        return all_attrib
+        return getattr(module, '__all__', None)
     except:
-        print(tb.format_exc(),file=sys.stderr)         
+        print('\n', tb.format_exc()[:-1],file=sys.stderr)         
         print('Please make sure that',path,'can be imported',
               '(or exclude this path).', file=sys.stderr)
-#       sys.exit(1)        # FIXME Or a --sloppy option?
+#       sys.exit(1)        # FIXME Or a --forgiving option?
     finally:
-        sys.path.remove(head)
+        difference = sys.modules.viewkeys() - modules_before        
+        for k in difference:
+            sys.modules.pop(k)
+        sys.path = path_before
 
 
 def get_modules_from(files, excluded, opts, root):
