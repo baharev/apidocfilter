@@ -1,6 +1,20 @@
 from __future__ import print_function
-import sys, importlib, os
+import sys, importlib, os, string
 import traceback as tb
+
+def has_initpy(directory):
+    return os.path.isfile(os.path.join(directory, '__init__.py'))
+
+def find_top_package(root, path):
+    # root  = '/usr/lib/python2.7'
+    # path  = '/usr/lib/python2.7/dist-packages/scipy/sparse/linalg/isolve'    
+    # result: '/usr/lib/python2.7/dist-packages'  'scipy.sparse.linalg.isolve'
+    roothead = os.path.dirname(root)
+    head, tail = os.path.split(path)
+    while roothead!= head and has_initpy(head): 
+        head, pkg = os.path.split(head)
+        tail = os.path.join(pkg, tail)
+    return head, tail
 
 def get_all_attribute():
     #path = '/usr/lib/python2.7/dist-packages/scipy/sparse/linalg/isolve'
@@ -30,4 +44,9 @@ def main():
     print(get_all_attribute())
         
 if __name__ == '__main__':
-    main()
+    root = '/usr/lib/python2.7'
+    path = '/usr/lib/python2.7/dist-packages/scipy/sparse/linalg/isolve'
+    #path = '/usr/lib/python2.7/xml'
+    head, tail = find_top_package(root, path)
+    print(head, '\t', string.replace(tail, os.sep, '.'))
+    #main()
