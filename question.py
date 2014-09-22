@@ -1,48 +1,33 @@
 from __future__ import print_function
-import imp
-import importlib
-import os
-import sys
-import traceback
+import sys, importlib, os
+import traceback as tb
 
-# The goal is to return __all__ from __init__.py if __all__ is present, and 
-# return None otherwise. It is safe to assume that __init__.py exists.
-
-def get_all_attribute(path):
-    initpy_path = os.path.join(path,'__init__.py')
-    assert os.path.isfile(initpy_path), path
+def get_all_attribute():
+    #path = '/usr/lib/python2.7/dist-packages/scipy/sparse/linalg/isolve'
+    path = '/home/ali/ws-pydev/apidocfilter/A/B'
+    assert os.path.isdir(path)
     try:
-        module = imp.load_source('__a_hopefully_unique_name__', initpy_path)
+        path_before = list(sys.path)
+        modules_before = set(sys.modules)
+        #head, pkg = os.path.split(path) # How does this play with hierarchical packages?
+        #sys.path = [head] + sys.path # FIXME Prepend or append?
+        #module = importlib.import_module('scipy.sparse.linalg.isolve')
+        sys.path = sys.path + ['/home/ali/ws-pydev/apidocfilter/A']
+        module = importlib.import_module('B.C')        
         return getattr(module, '__all__', None)
     except:
-        print(traceback.format_exc())
-        print('imp.load_source failed for',initpy_path)
-        #sys.exit(1)
-        
-def get_all_attrib(path, package):
-    initpy_path = os.path.join(path,'__init__.py')
-    assert os.path.isfile(initpy_path), path
-    try:
-        sys.path.append(path)
-        module = importlib.import_module('__init__', package)
-        all_mods = getattr(module, '__all__', None)
-        del sys.modules['__init__'] 
-        return all_mods
-    except:
-        print(traceback.format_exc())
-        print('importlib.import_module failed for',initpy_path)
-        #sys.exit(1)
+        print('\n', tb.format_exc()[:-1],file=sys.stderr)         
+        print('Please make sure that',path,'can be imported',
+              '(or exclude this path).', file=sys.stderr)
+#       sys.exit(1)        # FIXME Or a --sloppy option?
     finally:
-        sys.path.remove(path)
+        difference = sys.modules.viewkeys() - modules_before        
+        for k in difference:
+            sys.modules.pop(k)
+        sys.path = path_before
 
 def main():
-    print(get_all_attribute('/usr/lib/python2.7/xml'))
-    print('--------------------------------------------------------------')
-    print(get_all_attrib('/usr/lib/python2.7/xml', 'xml'))    
-    print('--------------------------------------------------------------')
-    get_all_attribute('/usr/lib/python2.7/unittest')
-    print('--------------------------------------------------------------')
-    get_all_attrib('/usr/lib/python2.7/unittest', 'unittest')      
+    print(get_all_attribute())
         
 if __name__ == '__main__':
     main()
