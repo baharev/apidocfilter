@@ -14,7 +14,7 @@ def find_top_package(root, path):
     while roothead!= head and has_initpy(head): 
         head, pkg = os.path.split(head)
         tail = os.path.join(pkg, tail)
-    return head, tail
+    return head, string.replace(tail, os.sep, '.')
 
 def get_all_attribute():
     #path = '/usr/lib/python2.7/dist-packages/scipy/sparse/linalg/isolve'
@@ -48,5 +48,5 @@ if __name__ == '__main__':
     path = '/usr/lib/python2.7/dist-packages/scipy/sparse/linalg/isolve'
     #path = '/usr/lib/python2.7/xml'
     head, tail = find_top_package(root, path)
-    print(head, '\t', string.replace(tail, os.sep, '.'))
+    print(head, '\t', tail)
     #main()

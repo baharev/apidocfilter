@@ -18,6 +18,7 @@ from __future__ import print_function
 
 import importlib
 import os
+import string
 import sys
 import optparse
 import traceback as tb
@@ -208,8 +209,23 @@ def pkgname_modules_subpkgs(rootpath, excluded, opts):
         if not opts.includeprivate and is_private(pkg_name):
             del dirs[:] # skip all subdirectories as well
             continue
-        modules = get_modules(files, excluded, opts, root)
-        subpkgs = get_subpkgs( dirs, excluded, opts, root)
+        modules = get_modules(files, excluded, opts, root, rootpath)
+        subpkgs = get_subpkgs(dirs, excluded, opts, root, rootpath)
+        #
+        # FIXME If --respect-all is passed, the modules may contain only the 
+        # subpkgs, e.g. the xml package.
+        # These subpkgs should be removed from the modules and subpkgs should be 
+        # in the order as they were in modules (in __all__). 
+        # Careful: the same module name may be a name of a subpackage. It is 
+        # silly, but apparently allowed. So I can't just module\subpackages, I 
+        # also have to check if subpkgs does not name a py or pyc / pyx file.
+        # Remove all names from module if it does not name a py or pyc / pyx 
+        # file?
+        # Question: How could I guarantee the order of the subpackages?
+        # What if some packages were in __all__, some weren't but have something
+        # to document? Unless ALL subpackages are in modules, there is no way to
+        # do this.
+        #
         dirs[:] = subpkgs # visit only subpackages
         if modules or subpkgs:
             yield pkg_name, modules, subpkgs 
@@ -220,20 +236,20 @@ def is_private(pkg_name):
     return pkg_name.startswith('_') or '._' in pkg_name 
 
 
-def get_modules(files, excluded, opts, root):
+def get_modules(files, excluded, opts, root, rootpath):
     """
     Returns __all__ if __all__ is considered and is present in __init__.py, 
     otherwise the modules in the current directory are returned. 
     """
     if opts.respect_all:
-        todoc = get_all_attribute(root)
+        todoc = get_all_attribute(rootpath, root)
         if todoc is not None:
             return todoc
     # __all__ is either ignored by the user or not present in __init__.py
     return get_modules_from(files, excluded, opts, root)
 
 
-def get_all_attribute(path):
+def get_all_attribute(rootpath, path):
     """
     Returns the __all__ attribute of the package if has this attribute, 
     otherwise None is returned. Calls sys.exit on failure (e.g. ImportError).
@@ -241,20 +257,38 @@ def get_all_attribute(path):
     try:
         path_before = list(sys.path)
         modules_before = set(sys.modules)
-        head, pkg = os.path.split(path) # How does this play with hierarchical packages?
-        sys.path = [head] + sys.path # FIXME Prepend or append?
+        head, pkg = find_top_package(rootpath, path)
+        sys.path = sys.path + [head]  # FIXME Prepend or append? No difference on /usr/lib/python2.7
         module = importlib.import_module(pkg)
         return getattr(module, '__all__', None)
     except:
-        print('\n', tb.format_exc()[:-1],file=sys.stderr)         
-        print('Please make sure that',path,'can be imported',
-              '(or exclude this path).', file=sys.stderr)
+        print('\n', tb.format_exc()[:-1], file=sys.stderr)         
+        print('Please make sure that', pkg, 'can be imported',
+              '(or exclude %s).' % path, file=sys.stderr)
 #       sys.exit(1)        # FIXME Or a --forgiving option?
     finally:
         difference = sys.modules.viewkeys() - modules_before        
         for k in difference:
             sys.modules.pop(k)
         sys.path = path_before
+
+
+def find_top_package(root, path):
+    '''
+    Walks up in the directory hierarchy to find the top level package or until
+    hitting the root. For example:
+        root  = '/usr/lib/python2.7'
+        path  = '/usr/lib/python2.7/dist-packages/scipy/sparse/linalg/isolve'    
+        result: '/usr/lib/python2.7/dist-packages'  'scipy.sparse.linalg.isolve'
+    '''
+    assert path.startswith(root), '\n%s\n%s' % (root, path)
+    assert has_initpy(path), path
+    roothead = os.path.dirname(root)
+    head, tail = os.path.split(path)
+    while roothead != head and has_initpy(head): 
+        head, pkg = os.path.split(head)
+        tail = os.path.join(pkg, tail)
+    return head, string.replace(tail, os.sep, '.')
 
 
 def get_modules_from(files, excluded, opts, root):
@@ -266,28 +300,28 @@ def get_modules_from(files, excluded, opts, root):
                      (not f.startswith('_') or opts.includeprivate) )
 
 
-def get_subpkgs(dirs, excluded, opts, root):
+def get_subpkgs(dirs, excluded, opts, root, rootpath):
     """Filter out and sort the considered subpackages from dirs."""    
     exclude_prefixes = ('.',) if opts.includeprivate else ('.', '_')
     return sorted( d for d in dirs 
                       if not d.startswith(exclude_prefixes) and
                          norm_path(root, d) not in excluded and
                          has_initpy(os.path.join(root,d))   and 
-                         pkg_may_have_sg_to_document(opts,root,d) )
+                         pkg_may_have_sg_to_document(opts,root,d,rootpath) )
 
 
 def norm_path(root, mod_or_dir):
     return os.path.normpath(os.path.join(root,mod_or_dir))
 
 
-def pkg_may_have_sg_to_document(opts, root, d):
+def pkg_may_have_sg_to_document(opts, root, d, rootpath):
     """
     Returns True if __all__ is not considered. If __all__ is considered and it 
     is present in __init__.py, then it must be non-empty.
     """    
     if not opts.respect_all:
         return True
-    todoc = get_all_attribute(os.path.join(root,d))
+    todoc = get_all_attribute(rootpath, os.path.join(root,d))
     if todoc is None:
         return True
     return len(todoc) > 0
@@ -378,7 +412,7 @@ Note: By default this script will not overwrite already created files.""")
         sys.exit(1)
     if opts.includeprivate and opts.respect_all:
         msg = 'Either --private or --respect-all but not both'
-        print(msg,file=sys.stderr)
+        print(msg, file=sys.stderr)
         sys.exit(1)        
     if not os.path.isdir(opts.destdir):
         if not opts.dryrun:
