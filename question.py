@@ -44,6 +44,7 @@ def main():
     print(get_all_attribute())
         
 if __name__ == '__main__':
+    #print('linalg' in sorted(__import__('scipy').__all__))
     root = '/usr/lib/python2.7'
     path = '/usr/lib/python2.7/dist-packages/scipy/sparse/linalg/isolve'
     #path = '/usr/lib/python2.7/xml'

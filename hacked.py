@@ -225,6 +225,8 @@ def pkgname_modules_subpkgs(rootpath, excluded, opts):
         # What if some packages were in __all__, some weren't but have something
         # to document? Unless ALL subpackages are in modules, there is no way to
         # do this.
+        # scipy.linalg seems like an example: apparently it is not in 
+        # scipy.__all__ but it is a package to document.
         #
         dirs[:] = subpkgs # visit only subpackages
         if modules or subpkgs:
