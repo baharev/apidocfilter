@@ -21,7 +21,6 @@ import os
 import sys
 import optparse
 import traceback as tb
-from os import path
 
 from sphinx.util.osutil import walk
 from sphinx import __version__
@@ -55,12 +54,12 @@ def makename(package, module):
 
 def write_file(name, text, opts):
     """Write the output file for module/package <name>."""
-    fname = path.join(opts.destdir, '%s.%s' % (name, opts.suffix))
+    fname = os.path.join(opts.destdir, '%s.%s' % (name, opts.suffix))
     if opts.dryrun:
         # FIXME --quiet option?
         print('Would create file %s.' % fname)
         return
-    if not opts.force and path.isfile(fname):
+    if not opts.force and os.path.isfile(fname):
         #print('File %s already exists, skipping.' % fname)
         pass
     else:
@@ -172,8 +171,8 @@ def walk_dir_tree(rootpath, excludes, opts):
     # FIXME
     print('Started', file=sys.stderr)
     toplevels = []
-    if path.isfile(path.join(rootpath, INITPY)):
-        root_package = rootpath.split(path.sep)[-1]
+    if has_initpy(rootpath):
+        root_package = rootpath.split(os.sep)[-1]
     else:
         # generate .rst files for the top level modules even if we are  
         # not in a package (this is a one time exception)
@@ -190,6 +189,10 @@ def walk_dir_tree(rootpath, excludes, opts):
     return toplevels
 
 
+def has_initpy(directory):
+    return os.path.isfile(os.path.join(directory, INITPY))
+
+
 def pkgname_modules_subpkgs(rootpath, excluded, opts):
     """
     A generator filtering out the packages and modules as desired and yielding
@@ -201,7 +204,7 @@ def pkgname_modules_subpkgs(rootpath, excluded, opts):
             continue
         if INITPY not in files:
             continue
-        pkg_name = root[len(rootpath):].lstrip(path.sep).replace(path.sep, '.')
+        pkg_name = root[len(rootpath):].lstrip(os.sep).replace(os.sep, '.')
         if not opts.includeprivate and is_private(pkg_name):
             del dirs[:] # skip all subdirectories as well
             continue
@@ -256,10 +259,10 @@ def get_all_attribute(path):
 
 def get_modules_from(files, excluded, opts, root):
     """Filter out and sort the considered python modules from files."""
-    return sorted( path.splitext(f)[0] for f in files
-                   if path.splitext(f)[1] in PY_SUFFIXES and
-                      norm_path(root, f) not in excluded and
-                      f != INITPY                        and
+    return sorted( os.path.splitext(f)[0] for f in files
+                   if os.path.splitext(f)[1] in PY_SUFFIXES and
+                      norm_path(root, f) not in excluded    and
+                      f != INITPY                           and
                      (not f.startswith('_') or opts.includeprivate) )
 
 
@@ -267,14 +270,14 @@ def get_subpkgs(dirs, excluded, opts, root):
     """Filter out and sort the considered subpackages from dirs."""    
     exclude_prefixes = ('.',) if opts.includeprivate else ('.', '_')
     return sorted( d for d in dirs 
-                      if not d.startswith(exclude_prefixes)    and
-                         norm_path(root, d) not in excluded    and
-                         path.isfile(path.join(root,d,INITPY)) and 
+                      if not d.startswith(exclude_prefixes) and
+                         norm_path(root, d) not in excluded and
+                         has_initpy(os.path.join(root,d))   and 
                          pkg_may_have_sg_to_document(opts,root,d) )
 
 
 def norm_path(root, mod_or_dir):
-    return path.normpath(path.join(root,mod_or_dir))
+    return os.path.normpath(os.path.join(root,mod_or_dir))
 
 
 def pkg_may_have_sg_to_document(opts, root, d):
@@ -367,21 +370,21 @@ Note: By default this script will not overwrite already created files.""")
     if not opts.destdir:
         parser.error('An output directory is required.')
     if opts.header is None:
-        opts.header = path.normpath(rootpath).split(path.sep)[-1]
+        opts.header = os.path.normpath(rootpath).split(os.sep)[-1]
     if opts.suffix.startswith('.'):
         opts.suffix = opts.suffix[1:]
-    if not path.isdir(rootpath):
+    if not os.path.isdir(rootpath):
         print('%s is not a directory.' % rootpath, file=sys.stderr)
         sys.exit(1)
     if opts.includeprivate and opts.respect_all:
         msg = 'Either --private or --respect-all but not both'
         print(msg,file=sys.stderr)
         sys.exit(1)        
-    if not path.isdir(opts.destdir):
+    if not os.path.isdir(opts.destdir):
         if not opts.dryrun:
             os.makedirs(opts.destdir)
-    rootpath =   path.normpath(path.abspath(rootpath))
-    excludes = { path.normpath(path.abspath(exclude)) for exclude in excludes }
+    rootpath =   os.path.normpath(os.path.abspath(rootpath))
+    excludes = { os.path.normpath(os.path.abspath(exclude)) for exclude in excludes }
     modules = walk_dir_tree(rootpath, excludes, opts)
     if opts.full:
         modules.sort()
