@@ -273,6 +273,10 @@ def get_all_attribute(rootpath, path):
         for k in difference:
             sys.modules.pop(k)
         sys.path = path_before
+# TODO Use __import__? I don't see any benefit in using the importlib here.
+#      But it does break Python 2.6 compatibility...
+#      Try caching path and associated __all__, we currently look at each 
+#      package twice anyway    
 
 
 def find_top_package(root, path):
