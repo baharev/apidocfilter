@@ -58,6 +58,7 @@ def write_file(name, text, opts):
     fname = os.path.join(opts.destdir, '%s.%s' % (name, opts.suffix))
     if opts.dryrun:
         # FIXME --quiet option?
+        # wrap the print function
         print('Would create file %s.' % fname)
         return
     if not opts.force and os.path.isfile(fname):
@@ -210,27 +211,27 @@ def pkgname_modules_subpkgs(rootpath, excluded, opts):
             del dirs[:] # skip all subdirectories as well
             continue
         modules = get_modules(files, excluded, opts, root, rootpath)
-        subpkgs = get_subpkgs(dirs, excluded, opts, root, rootpath)
-        #
-        # FIXME If --respect-all is passed, the modules may contain only the 
-        # subpkgs, e.g. the xml package.
-        # These subpkgs should be removed from the modules and subpkgs should be 
-        # in the order as they were in modules (in __all__). 
-        # Careful: the same module name may be a name of a subpackage. It is 
-        # silly, but apparently allowed. So I can't just module\subpackages, I 
-        # also have to check if subpkgs does not name a py or pyc / pyx file.
-        # Remove all names from module if it does not name a py or pyc / pyx 
-        # file?
-        # Question: How could I guarantee the order of the subpackages?
-        # What if some packages were in __all__, some weren't but have something
-        # to document? Unless ALL subpackages are in modules, there is no way to
-        # do this.
-        # scipy.linalg seems like an example: apparently it is not in 
-        # scipy.__all__ but it is a package to document.
-        #
+        subpkgs = get_subpkgs(dirs,  excluded, opts, root, rootpath)
+        if opts.respect_all:
+            # The modules may contain only the subpkgs, e.g. the xml package.
+            # These subpkgs should be removed from the modules.
+            modules[:] = remove_subpkgs_from_modules(root, modules)
         dirs[:] = subpkgs # visit only subpackages
         if modules or subpkgs:
             yield pkg_name, modules, subpkgs 
+
+
+def remove_subpkgs_from_modules(root, modules):
+    """Remove all names from modules if it does not name a py/pyx file."""
+    # A module name may also be a name of a subpackage. It is silly, but 
+    # apparently allowed. So I can't just module - subpackages.
+    # Keep a module only if it is a py / pyx file.
+    # FIXME Can't we just reuse the files from the caller???
+    pyfiles = set( os.path.splitext(f)[0] for f in os.listdir(root)
+                                           if f.endswith(tuple(PY_SUFFIXES)) )
+    # FIXME scipy.sparse.csgraph ??? It has all but where is the implementation?
+    # FIXME Where did we loose dist-packages/zmq.devices, json, logging?
+    return [ m for m in modules if m in pyfiles ]
 
 
 # FIXME Do we still need the '._' check now that the path is properly excluded?
@@ -251,18 +252,25 @@ def get_modules(files, excluded, opts, root, rootpath):
     return get_modules_from(files, excluded, opts, root)
 
 
-def get_all_attribute(rootpath, path):
+def get_all_attribute(rootpath, path, cached={}):
     """
     Returns the __all__ attribute of the package if has this attribute, 
     otherwise None is returned. Calls sys.exit on failure (e.g. ImportError).
+    A very minimalistic caching is used.
     """
+    # FIXME Why does caching break scipy.linalg?
+    #if path in cached:
+    #    return cached[path]
+    
     try:
         path_before = list(sys.path)
         modules_before = set(sys.modules)
         head, pkg = find_top_package(rootpath, path)
         sys.path = sys.path + [head]  # FIXME Prepend or append? No difference on /usr/lib/python2.7
         module = importlib.import_module(pkg)
-        return getattr(module, '__all__', None)
+        all_attrib = getall_from(module)
+        cached[path] = all_attrib
+        return all_attrib
     except:
         print('\n', tb.format_exc()[:-1], file=sys.stderr)         
         print('Please make sure that', pkg, 'can be imported',
@@ -295,6 +303,15 @@ def find_top_package(root, path):
         head, pkg = os.path.split(head)
         tail = os.path.join(pkg, tail)
     return head, string.replace(tail, os.sep, '.')
+
+
+def getall_from(module):
+    all_attr = getattr(module, '__all__', None)
+    # Some packaged, for example dbus.mainloop.__init__.py uses a tuple.
+    # Convert to list if necessary. 
+    if all_attr is not None and not isinstance(all_attr, list):
+        all_attr = list(all_attr) 
+    return all_attr
 
 
 def get_modules_from(files, excluded, opts, root):
