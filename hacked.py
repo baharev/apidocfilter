@@ -22,6 +22,7 @@ import string
 import sys
 import optparse
 import traceback as tb
+from os.path import join
 
 from sphinx.util.osutil import walk
 from sphinx import __version__
@@ -55,7 +56,7 @@ def makename(package, module):
 
 def write_file(name, text, opts):
     """Write the output file for module/package <name>."""
-    fname = os.path.join(opts.destdir, '%s.%s' % (name, opts.suffix))
+    fname = join(opts.destdir, '%s.%s' % (name, opts.suffix))
     if opts.dryrun:
         # FIXME --quiet option?
         # wrap the print function
@@ -192,12 +193,12 @@ def walk_dir_tree(rootpath, excludes, opts):
 
 
 def has_initpy(directory):
-    return os.path.isfile(os.path.join(directory, INITPY))
+    return os.path.isfile( join(directory, INITPY) )
 
 
 def pkgname_modules_subpkgs(rootpath, excluded, opts):
     """
-    A generator filtering out the packages and modules as desired and yielding
+    A generator that filters out the packages and modules as desired and yields
     tuples of (package name, modules, subpackages).  
     """
     for root, dirs, files in walk(rootpath, followlinks=opts.followlinks):
@@ -210,27 +211,41 @@ def pkgname_modules_subpkgs(rootpath, excluded, opts):
         if not opts.includeprivate and is_private(pkg_name):
             del dirs[:] # skip all subdirectories as well
             continue
-        modules = get_modules(files, excluded, opts, root, rootpath)
+        # FIXME: call get_modules_from, then if __all__ is present, keep only 
+        #        those from __all__ that are also modules.
+        modules, has_docstring = get_pkg_info(files,excluded,opts,root,rootpath)
+        # - modules: either the modules in the current directory or a list with 
+        #   the contents of __all__ if --respect-all is True and __all__ is 
+        #   present in __init__.py. In this latter case, further filtering will 
+        #   be applied below so that the contents of modules are really modules.
+        # - has_docstring: only relevant if --respect-all is used. Certain 
+        #   packages (json, logging, zmq.devices, scipy.sparse.csgraph) have a 
+        #   docstring in __init__.py but no modules or subpackages to document; 
+        #   we need a flag that tells us whether __doc__ is present, so that the 
+        #   corresponding rst file is generated for this package nevertheless.  
         subpkgs = get_subpkgs(dirs,  excluded, opts, root, rootpath)
         if opts.respect_all:
             # The modules may contain only the subpkgs, e.g. the xml package.
-            # These subpkgs should be removed from the modules.
-            modules[:] = remove_subpkgs_from_modules(root, modules)
+            # These subpkgs should be removed from the modules, together with
+            # everything else that is not a module in the current directory.
+            modules[:] = remove_subpkgs_from_modules(root, modules, subpkgs)
         dirs[:] = subpkgs # visit only subpackages
-        if modules or subpkgs:
-            yield pkg_name, modules, subpkgs 
+        if modules or subpkgs or has_docstring:
+            # Modules are really modules by this time
+            yield pkg_name, modules, subpkgs
 
 
-def remove_subpkgs_from_modules(root, modules):
-    """Remove all names from modules if it does not name a py/pyx file."""
+def remove_subpkgs_from_modules(root, modules, subpkgs):
+    """Remove all names from modules that does not name a py/pyx file."""
     # A module name may also be a name of a subpackage. It is silly, but 
     # apparently allowed. So I can't just module - subpackages.
     # Keep a module only if it is a py / pyx file.
     # FIXME Can't we just reuse the files from the caller???
     pyfiles = set( os.path.splitext(f)[0] for f in os.listdir(root)
                                            if f.endswith(tuple(PY_SUFFIXES)) )
-    # FIXME scipy.sparse.csgraph ??? It has all but where is the implementation?
-    # FIXME Where did we loose dist-packages/zmq.devices, json, logging?
+    for m in modules:
+        if m in pyfiles and m in subpkgs:
+            print('Both a module and a package:', m, 'at', root,file=sys.stderr)
     return [ m for m in modules if m in pyfiles ]
 
 
@@ -239,20 +254,21 @@ def is_private(pkg_name):
     return pkg_name.startswith('_') or '._' in pkg_name 
 
 
-def get_modules(files, excluded, opts, root, rootpath):
+def get_pkg_info(files, excluded, opts, root, rootpath):
     """
     Returns __all__ if __all__ is considered and is present in __init__.py, 
     otherwise the modules in the current directory are returned. 
     """
     if opts.respect_all:
-        todoc = get_all_attribute(rootpath, root)
-        if todoc is not None:
-            return todoc
+        all_attrib, has_docstring = get_all_attrib_hasdocstring(rootpath, root)
+        if all_attrib is not None:
+            return all_attrib, has_docstring
+        # TODO What if todoc is None but has_docstring==True?
     # __all__ is either ignored by the user or not present in __init__.py
-    return get_modules_from(files, excluded, opts, root)
+    return get_modules_from(files, excluded, opts, root), None
 
 
-def get_all_attribute(rootpath, path, cached={}):
+def get_all_attrib_hasdocstring(rootpath, path, cached={}):
     """
     Returns the __all__ attribute of the package if has this attribute, 
     otherwise None is returned. Calls sys.exit on failure (e.g. ImportError).
@@ -269,8 +285,9 @@ def get_all_attribute(rootpath, path, cached={}):
         sys.path = sys.path + [head]  # FIXME Prepend or append? No difference on /usr/lib/python2.7
         module = importlib.import_module(pkg)
         all_attrib = getall_from(module)
-        cached[path] = all_attrib
-        return all_attrib
+        has_docstring = hasattr(module, '__doc__')
+        cached[path] = (all_attrib, has_docstring)
+        return all_attrib, has_docstring
     except:
         print('\n', tb.format_exc()[:-1], file=sys.stderr)         
         print('Please make sure that', pkg, 'can be imported',
@@ -301,14 +318,14 @@ def find_top_package(root, path):
     head, tail = os.path.split(path)
     while roothead != head and has_initpy(head): 
         head, pkg = os.path.split(head)
-        tail = os.path.join(pkg, tail)
+        tail = join(pkg, tail)
     return head, string.replace(tail, os.sep, '.')
 
 
 def getall_from(module):
     all_attr = getattr(module, '__all__', None)
-    # Some packaged, for example dbus.mainloop.__init__.py uses a tuple.
-    # Convert to list if necessary. 
+    # Some packages (for example dbus.mainloop.__init__.py) uses a tuple.
+    # Convert __all__ to list if necessary. 
     if all_attr is not None and not isinstance(all_attr, list):
         all_attr = list(all_attr) 
     return all_attr
@@ -329,12 +346,12 @@ def get_subpkgs(dirs, excluded, opts, root, rootpath):
     return sorted( d for d in dirs 
                       if not d.startswith(exclude_prefixes) and
                          norm_path(root, d) not in excluded and
-                         has_initpy(os.path.join(root,d))   and 
-                         pkg_may_have_sg_to_document(opts,root,d,rootpath) )
+                         has_initpy( join(root, d) )        and 
+                         pkg_may_have_sg_to_document(opts, root, d, rootpath) )
 
 
 def norm_path(root, mod_or_dir):
-    return os.path.normpath(os.path.join(root,mod_or_dir))
+    return os.path.normpath( join(root, mod_or_dir) )
 
 
 def pkg_may_have_sg_to_document(opts, root, d, rootpath):
@@ -344,10 +361,10 @@ def pkg_may_have_sg_to_document(opts, root, d, rootpath):
     """    
     if not opts.respect_all:
         return True
-    todoc = get_all_attribute(rootpath, os.path.join(root,d))
-    if todoc is None:
+    all_attr, has_docstr = get_all_attrib_hasdocstring(rootpath, join(root, d))
+    if all_attr is None:
         return True
-    return len(todoc) > 0
+    return len(all_attr) > 0 or has_docstr 
 
 
 def main(argv=sys.argv):
