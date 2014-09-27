@@ -171,7 +171,7 @@ def walk_dir_tree(rootpath, excludes, opts):
     Look for every file in the directory tree and create the corresponding
     ReST files.
     """
-    # FIXME
+    # FIXME Remove print() when done
     print('Started', file=sys.stderr)
     toplevels = []
     if has_initpy(rootpath):
@@ -214,11 +214,14 @@ def pkgname_modules_subpkgs(rootpath, excluded, opts):
         modules = get_modules_from(files, excluded, opts, root)
         subpkgs = get_subpkgs(dirs,  excluded, opts, root, rootpath)
         dirs[:] = subpkgs # visit only subpackages
-        has_docstr = False
+        has_docstr, has_nonempty_all = False, False 
+        # has_nonempty_all: e.g. multiprocessing.dummy has nonempty __all__ but 
+        # no modules, subpkgs or docstring to document.  
         if opts.respect_all:
             all_attr, has_docstr = get_all_attr_has_docstr(rootpath, root)
+            has_nonempty_all = bool(all_attr)            
             modules = get_only_modules(all_attr, modules)
-        if modules or subpkgs or has_docstr:
+        if modules or subpkgs or has_docstr or has_nonempty_all:
             yield pkg_name, modules, subpkgs
 
 
@@ -250,7 +253,7 @@ def pkg_to_doc(opts, root, d, rootpath):
     if not opts.respect_all:
         return True
     all_attr, has_docstr = get_all_attr_has_docstr(rootpath, join(root, d))
-    return all_attr is None or len(all_attr) > 0 or has_docstr 
+    return all_attr is None or bool(all_attr) or has_docstr 
 
 
 def get_only_modules(all_attr, modules):
