@@ -211,42 +211,15 @@ def pkgname_modules_subpkgs(rootpath, excluded, opts):
         if not opts.includeprivate and is_private(pkg_name):
             del dirs[:] # skip all subdirectories as well
             continue
-        # FIXME: call get_modules_from, then if __all__ is present, keep only 
-        #        those from __all__ that are also modules.
-        modules, has_docstring = get_pkg_info(files,excluded,opts,root,rootpath)
-        # - modules: either the modules in the current directory or a list with 
-        #   the contents of __all__ if --respect-all is True and __all__ is 
-        #   present in __init__.py. In this latter case, further filtering will 
-        #   be applied below so that the contents of modules are really modules.
-        # - has_docstring: only relevant if --respect-all is used. Certain 
-        #   packages (json, logging, zmq.devices, scipy.sparse.csgraph) have a 
-        #   docstring in __init__.py but no modules or subpackages to document; 
-        #   we need a flag that tells us whether __doc__ is present, so that the 
-        #   corresponding rst file is generated for this package nevertheless.  
+        modules = get_modules_from(files, excluded, opts, root)
         subpkgs = get_subpkgs(dirs,  excluded, opts, root, rootpath)
-        if opts.respect_all:
-            # The modules may contain only the subpkgs, e.g. the xml package.
-            # These subpkgs should be removed from the modules, together with
-            # everything else that is not a module in the current directory.
-            modules[:] = remove_subpkgs_from_modules(root, modules, subpkgs)
         dirs[:] = subpkgs # visit only subpackages
-        if modules or subpkgs or has_docstring:
-            # Modules are really modules by this time
+        has_docstr = False
+        if opts.respect_all:
+            all_attr, has_docstr = get_all_attr_has_docstr(rootpath, root)
+            modules = get_only_modules(all_attr, modules)
+        if modules or subpkgs or has_docstr:
             yield pkg_name, modules, subpkgs
-
-
-def remove_subpkgs_from_modules(root, modules, subpkgs):
-    """Remove all names from modules that does not name a py/pyx file."""
-    # A module name may also be a name of a subpackage. It is silly, but 
-    # apparently allowed. So I can't just module - subpackages.
-    # Keep a module only if it is a py / pyx file.
-    # FIXME Can't we just reuse the files from the caller???
-    pyfiles = set( os.path.splitext(f)[0] for f in os.listdir(root)
-                                           if f.endswith(tuple(PY_SUFFIXES)) )
-    for m in modules:
-        if m in pyfiles and m in subpkgs:
-            print('Both a module and a package:', m, 'at', root,file=sys.stderr)
-    return [ m for m in modules if m in pyfiles ]
 
 
 # FIXME Do we still need the '._' check now that the path is properly excluded?
@@ -254,21 +227,44 @@ def is_private(pkg_name):
     return pkg_name.startswith('_') or '._' in pkg_name 
 
 
-def get_pkg_info(files, excluded, opts, root, rootpath):
-    """
-    Returns __all__ if __all__ is considered and is present in __init__.py, 
-    otherwise the modules in the current directory are returned. 
-    """
-    if opts.respect_all:
-        all_attrib, has_docstring = get_all_attrib_hasdocstring(rootpath, root)
-        if all_attrib is not None:
-            return all_attrib, has_docstring
-        # TODO What if todoc is None but has_docstring==True?
-    # __all__ is either ignored by the user or not present in __init__.py
-    return get_modules_from(files, excluded, opts, root), None
+def get_modules_from(files, excluded, opts, root):
+    """Filter out and sort the considered python modules from files."""
+    return sorted( os.path.splitext(f)[0] for f in files
+                   if os.path.splitext(f)[1] in PY_SUFFIXES and
+                      norm_path(root, f) not in excluded    and
+                      f != INITPY                           and
+                     (not f.startswith('_') or opts.includeprivate) )
 
 
-def get_all_attrib_hasdocstring(rootpath, path, cached={}):
+def get_subpkgs(dirs, excluded, opts, root, rootpath):
+    """Filter out and sort the considered subpackages from dirs."""    
+    exclude_prefixes = ('.',) if opts.includeprivate else ('.', '_')
+    return sorted( d for d in dirs 
+                      if not d.startswith(exclude_prefixes) and
+                         norm_path(root, d) not in excluded and
+                         has_initpy( join(root, d) )        and 
+                         pkg_to_doc(opts, root, d, rootpath)    )
+
+
+def pkg_to_doc(opts, root, d, rootpath):
+    if not opts.respect_all:
+        return True
+    all_attr, has_docstr = get_all_attr_has_docstr(rootpath, join(root, d))
+    return all_attr is None or len(all_attr) > 0 or has_docstr 
+
+
+def get_only_modules(all_attr, modules):
+    # If __all__ is not present in __init__.py, we take all the modules in the 
+    # current directory. Otherwise, we only keep those element of __all__ that 
+    # are also modules in the current directory.
+    if all_attr is None:
+        return modules
+    mods = set(modules)
+    return [m for m in all_attr if m in mods]
+
+
+# TODO Update doc
+def get_all_attr_has_docstr(rootpath, path, cached={}):
     """
     Returns the __all__ attribute of the package if has this attribute, 
     otherwise None is returned. Calls sys.exit on failure (e.g. ImportError).
@@ -285,7 +281,8 @@ def get_all_attrib_hasdocstring(rootpath, path, cached={}):
         sys.path = sys.path + [head]  # FIXME Prepend or append? No difference on /usr/lib/python2.7
         module = importlib.import_module(pkg)
         all_attrib = getall_from(module)
-        has_docstring = hasattr(module, '__doc__')
+        # cairo and zope has __doc__ but it is None
+        has_docstring = getattr(module, '__doc__', None) is not None
         cached[path] = (all_attrib, has_docstring)
         return all_attrib, has_docstring
     except:
@@ -331,40 +328,8 @@ def getall_from(module):
     return all_attr
 
 
-def get_modules_from(files, excluded, opts, root):
-    """Filter out and sort the considered python modules from files."""
-    return sorted( os.path.splitext(f)[0] for f in files
-                   if os.path.splitext(f)[1] in PY_SUFFIXES and
-                      norm_path(root, f) not in excluded    and
-                      f != INITPY                           and
-                     (not f.startswith('_') or opts.includeprivate) )
-
-
-def get_subpkgs(dirs, excluded, opts, root, rootpath):
-    """Filter out and sort the considered subpackages from dirs."""    
-    exclude_prefixes = ('.',) if opts.includeprivate else ('.', '_')
-    return sorted( d for d in dirs 
-                      if not d.startswith(exclude_prefixes) and
-                         norm_path(root, d) not in excluded and
-                         has_initpy( join(root, d) )        and 
-                         pkg_may_have_sg_to_document(opts, root, d, rootpath) )
-
-
 def norm_path(root, mod_or_dir):
     return os.path.normpath( join(root, mod_or_dir) )
-
-
-def pkg_may_have_sg_to_document(opts, root, d, rootpath):
-    """
-    Returns True if __all__ is not considered. If __all__ is considered and it 
-    is present in __init__.py, then it must be non-empty.
-    """    
-    if not opts.respect_all:
-        return True
-    all_attr, has_docstr = get_all_attrib_hasdocstring(rootpath, join(root, d))
-    if all_attr is None:
-        return True
-    return len(all_attr) > 0 or has_docstr 
 
 
 def main(argv=sys.argv):
