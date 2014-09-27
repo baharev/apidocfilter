@@ -217,8 +217,8 @@ def recurse_tree(rootpath, excludes, opts):
 
         if is_pkg:
             # we are in a package with something to document
-            if subs or len(py_files) > 1 or not \
-                shall_skip(path.join(root, INITPY), opts):
+            if subs or len(py_files) > 1: # or not \ # FIXME Seemed strange
+                #shall_skip(path.join(root, INITPY), opts):
                 subpackage = root[len(rootpath):].lstrip(path.sep).\
                     replace(path.sep, '.')
                 create_package_file(root, root_package, subpackage,
