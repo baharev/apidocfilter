@@ -180,7 +180,7 @@ def walk_dir_tree(rootpath, excludes, opts):
         # generate .rst files for the top level modules even if we are  
         # not in a package (this is a one time exception)
         root_package = None
-        mods = get_modules_from(os.listdir(rootpath), excludes, opts, rootpath)
+        mods = get_modules(os.listdir(rootpath), excludes, opts, rootpath)
         for module in mods:
             create_module_file(root_package, module, opts)
             toplevels.append(module)
@@ -206,12 +206,14 @@ def pkgname_modules_subpkgs(rootpath, excluded, opts):
             del dirs[:] # skip all subdirectories as well
             continue
         if INITPY not in files:
+            if root != rootpath:
+                del dirs[:]
             continue
         pkg_name = root[len(rootpath):].lstrip(os.sep).replace(os.sep, '.')
         if not opts.includeprivate and is_private(pkg_name):
-            del dirs[:] # skip all subdirectories as well
+            del dirs[:]
             continue
-        modules = get_modules_from(files, excluded, opts, root)
+        modules = get_modules(files, excluded, opts, root)
         subpkgs = get_subpkgs(dirs,  excluded, opts, root, rootpath)
         dirs[:] = subpkgs # visit only subpackages
         has_docstr, has_nonempty_all = False, False 
@@ -221,8 +223,9 @@ def pkgname_modules_subpkgs(rootpath, excluded, opts):
             all_attr, has_docstr = get_all_attr_has_docstr(rootpath, root)
             has_nonempty_all = bool(all_attr)            
             modules = get_only_modules(all_attr, modules)
-        if modules or subpkgs or has_docstr or has_nonempty_all:
-            yield pkg_name, modules, subpkgs
+        if ( modules or subpkgs or has_docstr or has_nonempty_all 
+             or not opts.respect_all ):
+                yield pkg_name, modules, subpkgs
 
 
 # FIXME Do we still need the '._' check now that the path is properly excluded?
@@ -230,7 +233,7 @@ def is_private(pkg_name):
     return pkg_name.startswith('_') or '._' in pkg_name 
 
 
-def get_modules_from(files, excluded, opts, root):
+def get_modules(files, excluded, opts, root):
     """Filter out and sort the considered python modules from files."""
     return sorted( os.path.splitext(f)[0] for f in files
                    if os.path.splitext(f)[1] in PY_SUFFIXES and
@@ -426,7 +429,7 @@ Note: By default this script will not overwrite already created files.""")
         if not opts.dryrun:
             os.makedirs(opts.destdir)
     rootpath =   os.path.normpath(os.path.abspath(rootpath))
-    excludes = { os.path.normpath(os.path.abspath(exclude)) for exclude in excludes }
+    excludes = { os.path.normpath(os.path.abspath(excl)) for excl in excludes }
     modules = walk_dir_tree(rootpath, excludes, opts)
     if opts.full:
         modules.sort()
