@@ -2,6 +2,8 @@ from __future__ import print_function
 import imp
 import inspect
 
+# Module inspection stuff
+
 FAKE_NAME = '__noSuchName__'
             
 def members_to_doc(module_path):

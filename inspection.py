@@ -6,16 +6,18 @@ import inspect
             
 def members_to_doc(pkgname):
     module = import_module(pkgname)
-    return getattr(module, '__all__', get_members_to_doc(module,pkgname))
+    mem_by_inspection = get_members_to_doc(module)
+    return getattr(module, '__all__', mem_by_inspection)
 
-def get_members_to_doc(module,pkgname):
+def get_members_to_doc(module):
     to_doc = [ ]
     for name, obj in inspect.getmembers(module):
         # There will be __doc__ with obj either being str or NoneType
-        if not_hidden(name) and is_in_module(obj,pkgname):
+        if not_hidden(name) and is_in_module(obj, module.__name__):
             to_doc.append(name)
     return to_doc
 
+# HACK
 def not_hidden(name):
     return True
     #return not name.startswith('_')
