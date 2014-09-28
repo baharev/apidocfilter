@@ -261,28 +261,31 @@ def get_only_modules(all_attr, modules):
     return [m for m in all_attr if m in mods]
 
 
-def get_all_attr_has_docstr(rootpath, path, opts):
+def get_all_attr_has_docstr(rootpath, path, opts, cached={}):
     """Returns a tuple: the ``__all__`` attribute of the package as a list 
     (``None`` if ``__all__`` is not  present) and a ``bool`` indicating whether
     the module has a doc string. Calls ``sys.exit`` on failure 
-    (e.g. ``ImportError``), unless the --ignore-errors flag is used.
+    (e.g. ``ImportError``), unless the --ignore-errors flag is used. Returns 
+    ``(None, False)`` on ignored error. A simple-minded caching is used as we 
+    look at each package twice.
     """
-    # TODO Why does caching break scipy.linalg?
-    #if path in cached:
-    #    return cached[path]
+    if path in cached:
+        return cached[path]
     
     try:
         path_before = list(sys.path)
         modules_before = set(sys.modules)
         head, pkg = find_top_package(rootpath, path)
-        sys.path.append(head)  # TODO Prepend or append?
-        __import__(pkg)  # <- for Python 2.6 compatibility
+        sys.path.append(head)  # Prepend or append?
+        __import__(pkg)  # for Python 2.6 compatibility
         module = sys.modules[pkg]
         all_attrib = getall_from(module)
         # cairo and zope has __doc__ but it is None
         has_docstring = getattr(module, '__doc__', None) is not None
-        #cached[path] = (all_attrib, has_docstring)
-        return all_attrib, has_docstring
+        cached[path] = (all_attrib, has_docstring)
+        return cached[path]
+    except AssertionError:
+        raise    
     except:
         print('\n', tb.format_exc().rstrip(), file=sys.stderr)         
         print('Please make sure that the package \'%s\' can be imported (or use'
@@ -294,7 +297,9 @@ def get_all_attr_has_docstr(rootpath, path, opts):
         for k in difference:
             sys.modules.pop(k)
         sys.path = path_before
-    return None, False # On ignored error, for example on ImportError
+    # We only get here if there was an ignored error, for example on ImportError
+    cached[path] = (None, False) 
+    return cached[path] 
 
 
 def find_top_package(root, path):
