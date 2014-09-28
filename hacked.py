@@ -16,7 +16,6 @@
 """
 from __future__ import print_function
 
-import importlib
 import os
 import string
 import sys
@@ -54,19 +53,21 @@ def makename(package, module):
     return name
 
 
+def wrapped_print(msg, opts):
+    if not opts.quiet:
+        print(msg)
+
+
 def write_file(name, text, opts):
     """Write the output file for module/package <name>."""
     fname = join(opts.destdir, '%s.%s' % (name, opts.suffix))
     if opts.dryrun:
-        # FIXME --quiet option?
-        # wrap the print function
-        print('Would create file %s.' % fname)
+        wrapped_print('Would create file %s.' % fname, opts)
         return
     if not opts.force and os.path.isfile(fname):
-        #print('File %s already exists, skipping.' % fname)
-        pass
+        wrapped_print('File %s already exists, skipping.' % fname, opts)
     else:
-        #print('Creating file %s.' % fname)
+        wrapped_print('Creating file %s.' % fname, opts)
         f = open(fname, 'w')
         try:
             f.write(text)
@@ -167,12 +168,9 @@ def create_modules_toc_file(modules, opts, name='modules'):
 
 
 def walk_dir_tree(rootpath, excludes, opts):
+    """ Walk the directory tree and create the corresponding ReST files as 
+    dictated by the options.
     """
-    Look for every file in the directory tree and create the corresponding
-    ReST files.
-    """
-    # FIXME Remove print() when done
-    print('Started', file=sys.stderr)
     toplevels = []
     if has_initpy(rootpath):
         root_package = rootpath.split(os.sep)[-1]
@@ -185,7 +183,8 @@ def walk_dir_tree(rootpath, excludes, opts):
             create_module_file(root_package, module, opts)
             toplevels.append(module)
     # Do the actual directory tree walk
-    for pkgname,mods,subpkgs in pkgname_modules_subpkgs(rootpath,excludes,opts):
+    pkgname_mods_subpkgs = pkgname_modules_subpkgs(rootpath, excludes, opts)
+    for pkgname, mods, subpkgs in pkgname_mods_subpkgs:
         create_package_file(root_package, pkgname, mods, opts, subpkgs)
         toplevels.append(makename(root_package, pkgname))
 
@@ -217,7 +216,7 @@ def pkgname_modules_subpkgs(rootpath, excluded, opts):
         dirs[:] = subpkgs # visit only subpackages
         has_sg_to_doc = True 
         if opts.respect_all:
-            all_attr, has_docstr = get_all_attr_has_docstr(rootpath, root)
+            all_attr, has_docstr = get_all_attr_has_docstr(rootpath, root, opts)
             has_sg_to_doc = has_docstr or bool(all_attr)
             # has_sg_to_doc: e.g. multiprocessing.dummy has nonempty __all__ but 
             # no modules, subpkgs or docstring to document -> still document it!                   
@@ -248,7 +247,7 @@ def get_subpkgs(dirs, excluded, opts, root, rootpath):
 def pkg_to_doc(opts, root, d, rootpath):
     if not opts.respect_all:
         return True
-    all_attr, has_docstr = get_all_attr_has_docstr(rootpath, join(root, d))
+    all_attr, has_docstr = get_all_attr_has_docstr(rootpath, join(root,d), opts)
     return all_attr is None or bool(all_attr) or has_docstr 
 
 
@@ -262,14 +261,13 @@ def get_only_modules(all_attr, modules):
     return [m for m in all_attr if m in mods]
 
 
-# TODO Update doc
-def get_all_attr_has_docstr(rootpath, path, cached={}):
+def get_all_attr_has_docstr(rootpath, path, opts):
     """Returns a tuple: the ``__all__`` attribute of the package as a list 
     (``None`` if ``__all__`` is not  present) and a ``bool`` indicating whether
     the module has a doc string. Calls ``sys.exit`` on failure 
-    (e.g. ``ImportError``).
+    (e.g. ``ImportError``), unless the --ignore-errors flag is used.
     """
-    # FIXME Why does caching break scipy.linalg?
+    # TODO Why does caching break scipy.linalg?
     #if path in cached:
     #    return cached[path]
     
@@ -277,27 +275,26 @@ def get_all_attr_has_docstr(rootpath, path, cached={}):
         path_before = list(sys.path)
         modules_before = set(sys.modules)
         head, pkg = find_top_package(rootpath, path)
-        sys.path = sys.path + [head]  # FIXME Prepend or append? No difference on /usr/lib/python2.7
-        module = importlib.import_module(pkg)
+        sys.path = sys.path + [head]  # TODO Prepend or append?
+        __import__(pkg)  # <- for Python 2.6 compatibility
+        module = sys.modules[pkg]
         all_attrib = getall_from(module)
         # cairo and zope has __doc__ but it is None
         has_docstring = getattr(module, '__doc__', None) is not None
-        cached[path] = (all_attrib, has_docstring)
+        #cached[path] = (all_attrib, has_docstring)
         return all_attrib, has_docstring
     except:
-        print('\n', tb.format_exc()[:-1], file=sys.stderr)         
-        print('Please make sure that', pkg, 'can be imported',
-              '(or exclude %s).' % path, file=sys.stderr)
-#       sys.exit(1)        # FIXME Or a --forgiving option?
+        print('\n', tb.format_exc().rstrip(), file=sys.stderr)         
+        print('Please make sure that the package \'%s\' can be imported (or use'
+              ' --ignore-errors\nor exclude %s).' % (pkg,path), file=sys.stderr)
+        if not opts.ignore_errors:
+            sys.exit(1)
     finally:
         difference = sys.modules.viewkeys() - modules_before        
         for k in difference:
             sys.modules.pop(k)
         sys.path = path_before
-# TODO Use __import__? I don't see any benefit in using the importlib here.
-#      But it does break Python 2.6 compatibility...
-#      Try caching path and associated __all__, we currently look at each 
-#      package twice anyway    
+    return None, False # On ignored error, for example on ImportError
 
 
 def find_top_package(root, path):
@@ -392,8 +389,13 @@ Note: By default this script will not overwrite already created files.""")
                       help='Show version information and exit')
     parser.add_option('--respect-all', action='store_true',
                       dest='respect_all',
-                      help='Respect __all__ when looking for modules')    
-
+                      help='Respect __all__ when looking for modules')
+    parser.add_option('--quiet', action='store_true',
+                      dest='quiet',
+                      help='Do not show which files are created or skipped')
+    parser.add_option('--ignore-errors', action='store_true',
+                      dest='ignore_errors', 
+                      help='Ignore import errors and continue')
     (opts, args) = parser.parse_args(argv[1:])
 
     if opts.show_version:
@@ -416,7 +418,11 @@ Note: By default this script will not overwrite already created files.""")
     if opts.includeprivate and opts.respect_all:
         msg = 'Either --private or --respect-all but not both'
         print(msg, file=sys.stderr)
-        sys.exit(1)        
+        sys.exit(1)
+    if opts.ignore_errors and not opts.respect_all:
+        msg = 'The --ignore-errors flag is only meaningful with --respect-all'
+        print(msg, file=sys.stderr)
+        sys.exit(1)
     if not os.path.isdir(opts.destdir):
         if not opts.dryrun:
             os.makedirs(opts.destdir)
