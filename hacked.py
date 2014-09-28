@@ -177,7 +177,7 @@ def walk_dir_tree(rootpath, excludes, opts):
     if has_initpy(rootpath):
         root_package = rootpath.split(os.sep)[-1]
     else:
-        # generate .rst files for the top level modules even if we are  
+        # Generate .rst files for the top level modules even if we are  
         # not in a package (this is a one time exception)
         root_package = None
         mods = get_modules(os.listdir(rootpath), excludes, opts, rootpath)
@@ -197,9 +197,8 @@ def has_initpy(directory):
 
 
 def pkgname_modules_subpkgs(rootpath, excluded, opts):
-    """
-    A generator that filters out the packages and modules as desired and yields
-    tuples of (package name, modules, subpackages).  
+    """A generator that filters out the packages and modules as desired and 
+    yields tuples of (package name, modules, subpackages).  
     """
     for root, dirs, files in walk(rootpath, followlinks=opts.followlinks):
         if root in excluded:
@@ -210,27 +209,21 @@ def pkgname_modules_subpkgs(rootpath, excluded, opts):
                 del dirs[:]
             continue
         pkg_name = root[len(rootpath):].lstrip(os.sep).replace(os.sep, '.')
-        if not opts.includeprivate and is_private(pkg_name):
+        if not opts.includeprivate and pkg_name.startswith('_'):
             del dirs[:]
             continue
         modules = get_modules(files, excluded, opts, root)
         subpkgs = get_subpkgs(dirs,  excluded, opts, root, rootpath)
         dirs[:] = subpkgs # visit only subpackages
-        has_docstr, has_nonempty_all = False, False 
-        # has_nonempty_all: e.g. multiprocessing.dummy has nonempty __all__ but 
-        # no modules, subpkgs or docstring to document.  
+        has_sg_to_doc = True 
         if opts.respect_all:
             all_attr, has_docstr = get_all_attr_has_docstr(rootpath, root)
-            has_nonempty_all = bool(all_attr)            
+            has_sg_to_doc = has_docstr or bool(all_attr)
+            # has_sg_to_doc: e.g. multiprocessing.dummy has nonempty __all__ but 
+            # no modules, subpkgs or docstring to document -> still document it!                   
             modules = get_only_modules(all_attr, modules)
-        if ( modules or subpkgs or has_docstr or has_nonempty_all 
-             or not opts.respect_all ):
+        if modules or subpkgs or has_sg_to_doc:
                 yield pkg_name, modules, subpkgs
-
-
-# FIXME Do we still need the '._' check now that the path is properly excluded?
-def is_private(pkg_name):
-    return pkg_name.startswith('_') or '._' in pkg_name 
 
 
 def get_modules(files, excluded, opts, root):
@@ -260,9 +253,9 @@ def pkg_to_doc(opts, root, d, rootpath):
 
 
 def get_only_modules(all_attr, modules):
-    # If __all__ is not present in __init__.py, we take all the modules in the 
-    # current directory. Otherwise, we only keep those element of __all__ that 
-    # are also modules in the current directory.
+    """If ``__all__`` is not present in ``__init__.py``, we take all the modules
+    in the current directory. Otherwise, we only keep those element of 
+    ``__all__`` that are also modules in the current directory."""
     if all_attr is None:
         return modules
     mods = set(modules)
@@ -271,10 +264,10 @@ def get_only_modules(all_attr, modules):
 
 # TODO Update doc
 def get_all_attr_has_docstr(rootpath, path, cached={}):
-    """
-    Returns the __all__ attribute of the package if has this attribute, 
-    otherwise None is returned. Calls sys.exit on failure (e.g. ImportError).
-    A very minimalistic caching is used.
+    """Returns a tuple: the ``__all__`` attribute of the package as a list 
+    (``None`` if ``__all__`` is not  present) and a ``bool`` indicating whether
+    the module has a doc string. Calls ``sys.exit`` on failure 
+    (e.g. ``ImportError``).
     """
     # FIXME Why does caching break scipy.linalg?
     #if path in cached:
@@ -308,13 +301,12 @@ def get_all_attr_has_docstr(rootpath, path, cached={}):
 
 
 def find_top_package(root, path):
-    '''
-    Walks up in the directory hierarchy to find the top level package or until
-    hitting the root. For example:
+    """Walks up in the directory hierarchy to find the top level package or 
+    until hitting the root. For example:
         root  = '/usr/lib/python2.7'
         path  = '/usr/lib/python2.7/dist-packages/scipy/sparse/linalg/isolve'    
         result: '/usr/lib/python2.7/dist-packages'  'scipy.sparse.linalg.isolve'
-    '''
+    """
     assert path.startswith(root), '\n%s\n%s' % (root, path)
     assert has_initpy(path), path
     roothead = os.path.dirname(root)
