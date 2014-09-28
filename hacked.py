@@ -279,7 +279,7 @@ def get_all_attr_has_docstr(rootpath, path, opts, cached={}):
         sys.path.append(head)  # Prepend or append?
         __import__(pkg)  # for Python 2.6 compatibility
         module = sys.modules[pkg]
-        all_attrib = getall_from(module)
+        all_attrib = get_all_from(module)
         # cairo and zope has __doc__ but it is None
         has_docstring = getattr(module, '__doc__', None) is not None
         cached[path] = (all_attrib, has_docstring)
@@ -304,11 +304,12 @@ def get_all_attr_has_docstr(rootpath, path, opts, cached={}):
 
 def find_top_package(root, path):
     """Walks up in the directory hierarchy to find the top level package or 
-    until hitting the root. For example:
-        root  = '/usr/lib/python2.7'
-        path  = '/usr/lib/python2.7/dist-packages/scipy/sparse/linalg/isolve'    
-        result: '/usr/lib/python2.7/dist-packages'  'scipy.sparse.linalg.isolve'
+    until hitting the root.
     """
+    # For example with:
+    #    root  = '/usr/lib/python2.7'
+    #    path  = '/usr/lib/python2.7/dist-packages/scipy/sparse/linalg/isolve'    
+    # result: '/usr/lib/python2.7/dist-packages', 'scipy.sparse.linalg.isolve'
     assert path.startswith(root), '\n%s\n%s' % (root, path)
     assert has_initpy(path), path
     roothead = os.path.dirname(root)
@@ -319,7 +320,7 @@ def find_top_package(root, path):
     return head, string.replace(tail, os.sep, '.')
 
 
-def getall_from(module):
+def get_all_from(module):
     all_attr = getattr(module, '__all__', None)
     # Some packages (for example dbus.mainloop.__init__.py) uses a tuple.
     # Convert __all__ to list if necessary. 
