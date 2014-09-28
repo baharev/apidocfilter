@@ -275,7 +275,7 @@ def get_all_attr_has_docstr(rootpath, path, opts):
         path_before = list(sys.path)
         modules_before = set(sys.modules)
         head, pkg = find_top_package(rootpath, path)
-        sys.path = sys.path + [head]  # TODO Prepend or append?
+        sys.path.append(head)  # TODO Prepend or append?
         __import__(pkg)  # <- for Python 2.6 compatibility
         module = sys.modules[pkg]
         all_attrib = getall_from(module)
